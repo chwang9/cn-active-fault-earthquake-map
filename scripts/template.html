@@ -1,0 +1,2071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__CITY__ 活动断层与历史地震分布</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  onerror="this.onerror=null;var l=document.createElement('link');l.rel='stylesheet';l.href='leaflet.css';document.head.appendChild(l);">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='leaflet.js';s.onload=function(){window.__leafletReady&&window.__leafletReady();};document.head.appendChild(s);"></script>
+<style>
+  :root{
+    --bg:#070a0f; --panel:#0f141b; --panel2:#141b24;
+    --line:rgba(255,255,255,.13); --line2:rgba(255,255,255,.075);
+    --fg:#f2f6fa; --dim:#c2cedb; --dim2:#9aa9b8;
+    --accent:#4cc9ff; --accent-d:#1f6feb; --amber:#e3b341; --rose:#f778ba;
+    --sw:420px;                                  /* v1.8.0：352 → 420 */
+    --r:12px;                                    /* 面板统一圆角 */
+    --elev:0 14px 42px rgba(0,0,0,.58);
+    --glass:linear-gradient(180deg,rgba(24,31,41,.93),rgba(12,17,23,.95));
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;
+    font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+    background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased}
+
+  /* ============ 左右分栏骨架 ============ */
+  .app{display:flex;height:100%;width:100%}
+  .side{width:var(--sw);flex:0 0 var(--sw);height:100%;display:flex;flex-direction:column;
+    background:linear-gradient(180deg,#131a23 0%,#0e131a 58%,#0a0e14 100%);
+    border-right:1px solid var(--line);z-index:1200;
+    box-shadow:14px 0 40px rgba(0,0,0,.45)}
+  .stage{flex:1 1 auto;position:relative;min-width:0;background:#0b1016}
+  #map{position:absolute;inset:0;background:#0b1016}
+
+  /* ============ 侧栏页眉 ============ */
+  .hd{padding:22px 24px 17px;border-bottom:1px solid var(--line);
+    background:linear-gradient(160deg,rgba(76,201,255,.10) 0%,rgba(76,201,255,.02) 55%,transparent 100%);
+    position:relative}
+  .hd:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+    background:linear-gradient(180deg,var(--accent),var(--accent-d))}
+  .hd .eyebrow{font-size:11px;letter-spacing:2.6px;color:var(--accent);
+    text-transform:uppercase;font-weight:700;margin-bottom:8px;opacity:.9}
+  .hd h1{margin:0;font-size:25px;font-weight:700;letter-spacing:.8px;color:#fff;line-height:1.22}
+  .hd h1 em{font-style:normal;color:var(--accent)}
+  .hd .meta{margin-top:10px;font-size:13px;color:var(--dim);line-height:1.75}
+  .hd .meta b{color:var(--fg);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .chip{font-size:11.5px;padding:4px 10px;border-radius:20px;color:var(--dim);
+    background:rgba(255,255,255,.05);border:1px solid var(--line);white-space:nowrap;
+    transition:all .16s}
+  .chip:hover{border-color:rgba(255,255,255,.22);color:var(--fg)}
+  .chip.on{color:#08121a;background:linear-gradient(135deg,var(--accent),#3aa8e0);
+    border-color:transparent;font-weight:700}
+  .chip.scope{color:#ffd9a0;background:rgba(227,179,65,.12);
+    border-color:rgba(227,179,65,.3);font-weight:600}
+
+  /* ============ 滚动区 ============ */
+  .scroll{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;
+    padding-bottom:8px}
+  .scroll::-webkit-scrollbar{width:8px}
+  .scroll::-webkit-scrollbar-track{background:transparent}
+  .scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:4px;
+    border:2px solid transparent;background-clip:padding-box}
+  .scroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.22);background-clip:padding-box}
+
+  section{padding:16px 22px;border-bottom:1px solid var(--line)}
+  section:last-of-type{border-bottom:none}
+  /* ============ v3.0.0 侧栏 tab 化 ============
+     原来三个 section（筛选 / 目录 / 断裂清单）纵向堆叠，卡片多且要滚动。
+     改成三个 tab：一次只呈现一件事，界面更干净、交互更简单。 */
+  .tabs{display:flex;gap:4px;padding:12px 16px 0;position:sticky;top:0;z-index:5;
+    background:linear-gradient(180deg,var(--panel) 72%,rgba(15,20,27,.86));
+    border-bottom:1px solid var(--line)}
+  .tabs .tab{flex:1;font:inherit;font-size:12.5px;padding:9px 4px 10px;cursor:pointer;
+    color:var(--dim2);background:transparent;border:0;border-bottom:2px solid transparent;
+    transition:color .15s,border-color .15s;white-space:nowrap}
+  .tabs .tab:hover{color:var(--fg)}
+  .tabs .tab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .pane{display:none;padding:16px 20px 20px}
+  .pane.on{display:block}
+  .pane > .sh{margin-top:0}
+  /* 搜索框（v3.1.0） */
+  .searchrow{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+  .searchrow input[type=search]{flex:1;font:inherit;font-size:12.5px;padding:8px 11px;
+    background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:8px;
+    color:var(--fg);outline:none;transition:border-color .15s,background .15s}
+  .searchrow input[type=search]::placeholder{color:var(--dim2)}
+  .searchrow input[type=search]:focus{border-color:rgba(76,201,255,.5);
+    background:rgba(76,201,255,.07)}
+  .searchrow .cnt{font-size:11.5px;color:var(--dim2);white-space:nowrap}
+  /* 下载按钮组 */
+  .dlrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;padding-top:12px;
+    border-top:1px solid var(--line)}
+  .dlrow .dltitle{width:100%;font-size:11.5px;color:var(--dim2);letter-spacing:.4px}
+  .dlbtn{font:inherit;font-size:12px;padding:7px 13px;cursor:pointer;
+    background:rgba(76,201,255,.12);color:#7fd4ff;border:1px solid rgba(76,201,255,.3);
+    border-radius:8px;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+  .dlbtn:hover{background:rgba(76,201,255,.24);border-color:rgba(76,201,255,.55)}
+  .dlbtn:active{transform:translateY(1px)}
+  .dlbtn .ico{font-size:13px;line-height:1}
+  /* v2.1.0：目录表 section 自适应填充侧栏剩余高度，表格内部滚动 ——
+     实测断裂清单 565px 常驻时目录表被挤出视口（内容 1412px vs 可见 793px）。 */
+  /* ⚠️ 必须带 .on —— 否则 ID 选择器（权重 1,0,0）会压过
+     `.pane{display:none}`（权重 0,1,0），导致「地震目录」面板
+     **即使没被激活也照样显示**（实测：概览与目录两个面板同屏）。
+     改成 `#qsec.on` 后，未激活时 `.pane{display:none}` 正常生效。 */
+  #qsec.on{display:flex;flex-direction:column;min-height:180px;flex:1 1 auto}
+  #qsec .tblwrap{flex:1 1 auto;min-height:0}
+  #qsec #qtable tbody tr{cursor:pointer}
+  /* 断裂清单折叠 */
+  /* 断裂清单（v3.0.0 已移到独立 tab，不再用 details 折叠） */
+  .fsec .fhowto{font-size:12px;line-height:1.75;color:#aab8c6;margin:0 0 10px;
+    padding:9px 11px;background:rgba(76,194,255,.05);
+    border-left:2px solid rgba(76,194,255,.45);border-radius:0 6px 6px 0}
+  .fsec #fwrap{max-height:min(52vh,460px)}
+  .fsec #ftable tbody tr{cursor:pointer}
+  .fsec #ftable tbody tr:hover{background:rgba(76,201,255,.16)}
+  /* v3.5.0：删除「目录表行高亮」的旧 CSS 规则 —— JS 从未给目录行加
+     'hl' 类（只有 .qkhl 用于地图上的 divIcon），属死代码。 */
+  /* divIcon 点位（M≥6）的高亮态：光晕加强 + 内核放大
+     ⚠️ 三处必须同时注意：
+       ① 权重：这两条原本与 `.qk .halo`/`.qk .core` **权重相同**（0,2,0）
+          却写在后面 → 后写的赢，高亮从未生效（浏览器实测
+          box-shadow 停在 11px、core transform 停在 scale(1)）。
+          现在多一层 `.qk`（0,3,0），与书写顺序无关。
+       ② opacity：M≥6 的 halo 挂着 `qkpulse` **无限动画**，动画值
+          优先于普通声明 —— 即便权重够，opacity 仍由关键帧决定，
+          高亮时反而从 0.11 掉到 0.03（更暗）。用 !important 覆盖
+          动画值（级联顺序：过渡 > !important > 动画 > 普通声明），
+          并暂停脉冲动画避免光晕乱缩。
+       ③ transform：内核的 scale 必须叠在 translate 之后，
+          否则圆心会从锚点挪走。 */
+  .qkhl .qk .halo{box-shadow:0 0 20px 3px var(--c);
+    opacity:.95 !important;animation-play-state:paused}
+  .qkhl .qk .core{transform:translate(-50%,-50%) scale(1.28)}
+  .qk .halo,.qk .core{transition:transform .14s ease,box-shadow .14s ease}
+  .sh{display:flex;align-items:center;gap:8px;margin:0 0 12px;
+    font-size:12.5px;font-weight:700;letter-spacing:1.5px;color:var(--dim)}
+  .sh:before{content:"";width:3px;height:12px;border-radius:2px;
+    background:linear-gradient(180deg,var(--accent),var(--accent-d));flex:0 0 3px}
+  .sh .hint{font-weight:400;letter-spacing:0;color:var(--dim2);font-size:11.5px;
+    margin-left:auto;text-align:right}
+
+  /* ============ 表格 ============ */
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:5px 6px;text-align:left;border-bottom:1px solid rgba(255,255,255,.05)}
+  th{color:var(--dim2);font-weight:600;font-size:11.5px;letter-spacing:.5px;
+    text-transform:uppercase}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  tbody tr:last-child td{border-bottom:none}
+  .bar{height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;
+    margin-top:3px;min-width:52px}
+  .bar i{display:block;height:100%;border-radius:3px;
+    background:linear-gradient(90deg,var(--amber),#f0883e)}
+
+  /* ============ 筛选器 ============ */
+  .flt{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 12px}
+  .frow{display:flex;align-items:center;gap:9px;padding:4px 0}
+  .frow label{font-size:12px;color:var(--dim);flex:0 0 52px}
+  .frow input[type=range]{flex:1 1 auto;min-width:0;-webkit-appearance:none;
+    appearance:none;height:3px;border-radius:2px;background:rgba(255,255,255,.12);
+    outline:none;cursor:pointer}
+  .frow input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
+    width:13px;height:13px;border-radius:50%;background:var(--accent);
+    border:2px solid #0e131a;box-shadow:0 0 0 1px var(--accent),0 2px 6px rgba(0,0,0,.6);
+    cursor:pointer}
+  .frow input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;
+    background:var(--accent);border:2px solid #0e131a;
+    box-shadow:0 0 0 1px var(--accent);cursor:pointer}
+  .frow b{flex:0 0 38px;text-align:right;font-size:12.5px;color:#fff;
+    font-variant-numeric:tabular-nums;font-weight:600}
+  .fchips{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 2px}
+  .fchip{font-size:11.5px;padding:3px 9px;border-radius:14px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(255,255,255,.04);
+    color:var(--dim);user-select:none;transition:all .14s;white-space:nowrap}
+  .fchip:hover{border-color:rgba(255,255,255,.28);color:var(--fg)}
+  .fchip.on{color:#0a0e13;font-weight:700;border-color:transparent}
+  .fbtns{display:flex;gap:6px;margin-top:9px}
+  .fbtns button{flex:1;font:inherit;font-size:11.5px;padding:5px 0;cursor:pointer;
+    background:rgba(255,255,255,.05);color:var(--dim);
+    border:1px solid var(--line);border-radius:6px;transition:all .15s}
+  .fbtns button:hover{background:rgba(76,194,255,.16);color:var(--accent);
+    border-color:rgba(76,194,255,.4)}
+  .fbtns button.on{background:var(--accent);color:#0a0e13;border-color:var(--accent);
+    font-weight:700}
+  .fbtns button:disabled{opacity:.38;cursor:not-allowed;border-style:dashed}
+  .fbtns button:disabled:hover{background:rgba(255,255,255,.05);color:var(--dim);
+    border-color:var(--line)}
+  .fstat{margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.07);
+    font-size:12px;color:var(--dim);display:flex;justify-content:space-between}
+  .fstat b{color:var(--accent);font-variant-numeric:tabular-nums}
+
+  /* 直方图样式在下方「图层面板内嵌」段（.hbars + .histax），
+     v3.5.0 已删除此处失效的 .hist/.histax/.peak 旧规则
+     （Python 端 v3.4.0 起输出的是 .hbars，浏览器实测
+      histEls=0 / hbarsEls=1 / peakEls=0 → 旧规则全是死代码）。 */
+
+  /* ============ 目录表 ============ */
+  .tblwrap{max-height:340px;overflow-y:auto;border:1px solid var(--line);border-radius:9px;
+    background:rgba(0,0,0,.2)}
+  .tblwrap::-webkit-scrollbar{width:7px}
+  .tblwrap::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:4px}
+  #qtable{font-size:12px}
+  #qtable thead th{position:sticky;top:0;background:#1a212a;z-index:2;cursor:pointer;
+    user-select:none;white-space:nowrap;padding:6px}
+  #qtable thead th:hover{color:var(--accent)}
+  #qtable td{white-space:nowrap;padding:4px 6px}
+  #qtable tbody tr{cursor:pointer;
+    /* 屏幕外的行跳过布局与绘制（汶川 1268 行时省掉上千行的渲染成本），
+       必须给 contain-intrinsic-size 否则滚动条高度会跳变 */
+    content-visibility:auto;contain-intrinsic-size:auto 23px}
+  #qtable tbody tr:nth-child(even){background:rgba(255,255,255,.022)}
+  /* 分页控件：只有数据超过一页时才出现（前端按需取消 hidden） */
+  .tmore{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .tmore button{font:inherit;font-size:12px;padding:5px 12px;cursor:pointer;
+    background:rgba(76,194,255,.14);color:var(--accent);
+    border:1px solid rgba(76,194,255,.35);border-radius:6px;transition:all .15s}
+  .tmore button:hover{background:rgba(76,194,255,.26)}
+  .tmore .tcount{font-size:11.5px;color:var(--dim2);
+    font-variant-numeric:tabular-nums}
+  #qtable tbody tr:hover{background:rgba(76,194,255,.12)}
+  #qtable .md{color:#ff9f6b;font-weight:700}
+  #qtable .md6{color:var(--rose);font-weight:700}
+  #qtable td.sc{color:#9fb0bf;font-weight:600}
+  #qtable td.sc.in{color:#ff5a4d;font-weight:700}
+  #qtable td.sc.out{color:#7e8b98;font-weight:500}
+  #qtable td.src{font-weight:700}
+  #qtable td.src.cenc{color:#ff5a4d}
+  #qtable td.src.usgs{color:#7e8b98;font-weight:500}
+
+  /* ============ 侧栏页脚 ============ */
+  .foot{padding:14px 22px 20px;font-size:11.5px;color:var(--dim2);line-height:1.85;
+    background:rgba(0,0,0,.2)}
+  .foot b{color:var(--dim);font-weight:600}
+  .foot a{color:var(--accent);text-decoration:none}
+
+  /* ============ 地图区：右侧浮层列（图层面板 + 分布图表） ============
+     v1.8.0：右上角原本只有一个图层面板，新增的图表面板若各自 absolute
+     定位，高度一变就会互相压叠。改成一列 flex 容器承载两者：
+     纵向排列天然不重叠，容器再用 bottom 限制总高、内部滚动兜底。 */
+  .mcol{position:absolute;top:16px;right:16px;z-index:1100;width:246px;
+    display:flex;flex-direction:column;gap:12px;align-items:stretch;
+    /* 高度跟着内容走，超过可用高度才滚动。
+       不写成 top+bottom 撑满：那样容器会有一大片透明空白，
+       若再为了滚动给它 pointer-events:auto，空白区就会吃掉地图拖拽。
+       高度=内容高度时容器没有空白，也就不挡地图。 */
+    max-height:calc(100% - 68px);overflow-y:auto;overflow-x:hidden;
+    pointer-events:auto;scrollbar-width:thin}
+  .mcol::-webkit-scrollbar{width:6px}
+  .mcol::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
+  .mcol::-webkit-scrollbar-track{background:transparent}
+  .mcol > *{flex:0 0 auto}
+
+  .card{background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,.11);border-radius:var(--r);
+    box-shadow:var(--elev);overflow:hidden;font-family:inherit}
+  .card .ct{font-size:11.5px;letter-spacing:1.6px;font-weight:700;color:var(--dim);
+    padding:10px 13px 9px;border-bottom:1px solid var(--line);
+    text-transform:uppercase;display:flex;align-items:center;gap:7px;
+    background:linear-gradient(180deg,rgba(255,255,255,.045),transparent)}
+  .card .ct:before{content:"";width:3px;height:11px;border-radius:2px;
+    background:linear-gradient(180deg,var(--accent),var(--accent-d))}
+
+  /* ============ 右上角图层控制（全部多选） ============ */
+  .lctrl{flex:0 0 auto;background:var(--glass);
+    backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,.11);border-radius:var(--r);
+    box-shadow:var(--elev);overflow:hidden;font-family:inherit}
+  .lctrl .lt{font-size:11.5px;letter-spacing:1.6px;font-weight:700;color:var(--dim);
+    padding:10px 13px 9px;border-bottom:1px solid var(--line);
+    text-transform:uppercase;display:flex;align-items:center;gap:7px;
+    background:linear-gradient(180deg,rgba(255,255,255,.045),transparent)}
+  .lctrl .lt:before{content:"";width:3px;height:11px;border-radius:2px;
+    background:linear-gradient(180deg,var(--accent),var(--accent-d))}
+  .lctrl .lt .cnt{margin-left:auto;font-weight:500;letter-spacing:0;
+    color:var(--dim2);text-transform:none;font-size:11px;
+    padding:2px 7px;border-radius:10px;background:rgba(255,255,255,.06)}
+  .lctrl .lb{padding:5px 0}
+  /* 每行：开关 + 图例色标 + 主副标题。hover 时左侧亮起该图层的主题色条，
+     让「这条开关控制哪个视觉元素」一眼可辨。 */
+  .lctrl label{position:relative;display:flex;align-items:center;gap:10px;
+    padding:6px 13px;cursor:pointer;font-size:13px;color:#c9d4de;
+    user-select:none;transition:background .15s}
+  .lctrl label:hover{background:rgba(255,255,255,.06)}
+  .lctrl label:before{content:"";position:absolute;left:0;top:5px;bottom:5px;width:2px;
+    border-radius:0 2px 2px 0;background:var(--lc,#4cc9ff);opacity:0;transition:opacity .18s}
+  .lctrl label:hover:before{opacity:.9}
+  .lctrl label .tg{width:30px;height:17px;border-radius:9px;flex:0 0 30px;
+    background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.15);
+    position:relative;transition:background .2s,border-color .2s}
+  .lctrl label .tg i{position:absolute;left:2px;top:2px;width:11px;height:11px;
+    border-radius:50%;background:#aab6c2;transition:left .2s,background .2s}
+  .lctrl label.on .tg{background:var(--lc,#4cc9ff);border-color:transparent;
+    box-shadow:0 0 9px -1px var(--lc,#4cc9ff)}
+  .lctrl label.on .tg i{left:15px;background:#fff}
+  .lctrl label .sw{width:18px;height:0;border-top-width:2.5px;border-top-style:solid;
+    flex:0 0 18px}
+  .lctrl label .dot{width:11px;height:11px;border-radius:50%;flex:0 0 11px;
+    box-shadow:0 0 0 1.5px rgba(255,255,255,.8)}
+  .lctrl label .t{display:flex;flex-direction:column;line-height:1.3;min-width:0;flex:1 1 auto}
+  .lctrl label .t b{font-weight:600;font-size:13px;white-space:nowrap}
+  .lctrl label .t u{text-decoration:none;font-size:10.5px;color:var(--dim2);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lctrl label.off .t b{color:var(--dim2);font-weight:500}
+  .lctrl .lr{padding:8px 13px;border-top:1px solid var(--line);
+    display:flex;gap:6px}
+  .lctrl .lr button{flex:1;font:inherit;font-size:11px;padding:5px 0;cursor:pointer;
+    background:rgba(255,255,255,.06);color:var(--dim);border:1px solid var(--line);
+    border-radius:6px;transition:all .16s}
+  .lctrl .lr button:hover{background:rgba(76,201,255,.16);color:var(--accent);
+    border-color:rgba(76,201,255,.45)}
+
+  /* ============ 地图区：「分布」面板（v3.4.0 并入右侧常驻面板） ============
+     v2.1.0 曾是左下独立浮层，v3.0.0 并入右上 tab 面板，v3.4.0 去掉 tab 后
+     成为右侧常驻展开段。样式改由 .mcol / .sec 承载，下列 .mchart 规则
+     已无对应元素，属死代码，v3.4.0 一并清除（留着会误导后续维护者）。 */
+
+  /* ============ 地图区：左上角概览面板（由左侧栏迁移而来） ============ */
+  /* 概览与图例是「与地图强相关」的信息，放地图上更符合制图惯例；
+     左栏专注筛选与数据表这类需要纵向浏览的交互内容。 */
+  .mstat{position:relative;width:100%;margin:0 0 16px;
+    background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,.11);border-radius:var(--r);
+    box-shadow:var(--elev);overflow:hidden;font-family:inherit}
+  .mstat .mt{font-size:11.5px;letter-spacing:1.6px;font-weight:700;color:var(--dim);
+    padding:10px 13px 9px;border-bottom:1px solid var(--line);text-transform:uppercase;
+    display:flex;align-items:center;gap:7px;
+    background:linear-gradient(180deg,rgba(255,255,255,.045),transparent)}
+  .mstat .mt:before{content:"";width:3px;height:11px;border-radius:2px;
+    background:linear-gradient(180deg,var(--accent),var(--accent-d))}
+  .mstat .mt .tag{margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none;
+    font-size:11px;color:var(--dim2);font-variant-numeric:tabular-nums}
+  .mstat .mk{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:10px 11px 8px}
+  .mstat .c{background:rgba(255,255,255,.045);border:1px solid var(--line);
+    border-radius:7px;padding:7px 9px}
+  .mstat .c .k{font-size:11px;color:var(--dim2);margin-bottom:3px}
+  .mstat .c .v{font-size:19px;font-weight:700;color:#fff;line-height:1;
+    font-variant-numeric:tabular-nums}
+  .mstat .c .v small{font-size:11.5px;font-weight:500;color:var(--dim);margin-left:3px}
+  .mstat .c.hi{background:linear-gradient(135deg,rgba(76,194,255,.15),rgba(76,194,255,.03));
+    border-color:rgba(76,194,255,.32)}
+  .mstat .c.am{background:linear-gradient(135deg,rgba(227,179,65,.13),rgba(227,179,65,.03));
+    border-color:rgba(227,179,65,.3)}
+  .mstat .mrow{padding:0 11px 10px;display:flex;flex-direction:column;gap:5px}
+  .mstat .mrow .r{font-size:11.5px;color:var(--dim);line-height:1.5;
+    display:flex;gap:7px;align-items:baseline}
+  .mstat .mrow .r b{color:#dde5ed;font-weight:600;flex:0 0 auto}
+  .mstat .mrow .r .v{color:var(--fg);word-break:break-all}
+  .mstat .cnote{font-size:11px;color:var(--dim2);line-height:1.55}
+  .mstat .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;
+    padding:3px 8px;border-radius:12px;align-self:flex-start;
+    background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--dim)}
+  .mstat .badge.good{background:rgba(63,185,80,.1);border-color:rgba(63,185,80,.3);
+    color:#7ee787}
+  .mstat .badge.sparse{background:rgba(248,81,73,.1);border-color:rgba(248,81,73,.32);
+    color:#ff7b72}
+  .mstat .badge.modern{background:rgba(76,194,255,.1);border-color:rgba(76,194,255,.32);
+    color:#4cc2ff}
+  /* ============ 地图区：左下角分布面板（v2.1.0 由右上移来） ============ */
+  /* 布局重构：原先「左上概览 + 右上两层面板 + 左下图例」三面合围，
+     实测地图有效区被压成中间一条（唐山 1600×950 下三面浮层合计占掉
+     约 820px 高度与 700px 宽度）。v2.1.0 改为四角平衡：
+       左上 = 统计概览    右上 = 图层面板（含内嵌图例）
+       左下 = 分布面板    右下 = 数据源角标
+     独立图例浮层取消，图例并入图层面板底部（少一个浮层、少一次遮挡）。 */
+  /* v3.0.0：分布面板已并入右上 tab 面板（.mpane），独立浮层取消
+     v3.4.0：右上 tab 取消，三段常驻展开；样式全部由 .lctrl .mpane 承载。
+     原 .mchart 选择器已无对应元素（#mchart 元素已删除），属死代码 ——
+     留着会让人以为「分布面板还是独立浮层」，误改错地方。 */
+
+  /* ============ 地图区右上面板（三段常驻展开，无 tab） ============ */
+  .mpane{display:block}
+  .lctrl .mpane + .lctrl .mpane{border-top:1px solid var(--line)}
+  .lctrl .mpane .lt{font-size:12px;letter-spacing:1.5px;font-weight:700;color:var(--dim);
+    text-transform:uppercase;margin:0;padding:11px 14px 8px;display:flex;align-items:center;gap:7px}
+  .lctrl .mpane .lt:before{content:"";width:3px;height:11px;border-radius:2px;background:var(--accent)}
+  .lctrl .mpane .ct{font-size:12px;letter-spacing:1.6px;font-weight:700;color:var(--dim);
+    padding:11px 14px 8px;border-bottom:1px solid var(--line);text-transform:uppercase;
+    display:flex;align-items:center;gap:7px}
+  .lctrl .mpane .ct:before{content:"";width:3px;height:11px;border-radius:2px;background:var(--accent)}
+  .lctrl .mpane .ct .cnt{margin-left:auto;font-weight:500;letter-spacing:0;color:var(--dim2);
+    text-transform:none;font-size:11.5px}
+  .lctrl .mpane .cb{padding:4px 14px 12px;max-height:min(56vh,420px);overflow-y:auto}
+  .lctrl .mpane .sub{font-size:11px;color:var(--dim2);margin:10px 0 5px;letter-spacing:.5px}
+  .lctrl .mpane table{width:100%;border-collapse:collapse;font-size:12px}
+  .lctrl .mpane table th{font-size:11px;color:var(--dim2);font-weight:600;text-align:left;
+    padding:3px 0;border-bottom:1px solid var(--line)}
+  .lctrl .mpane table td{padding:3.5px 0;color:#dde5ed}
+  .lctrl .mpane table td.n{text-align:right;font-variant-numeric:tabular-nums}
+  .lctrl .mpane .bar{height:5px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden}
+  .lctrl .mpane .bar i{display:block;height:100%;border-radius:3px;
+    background:linear-gradient(90deg,var(--accent-d),var(--accent))}
+  /* 年代直方图：v3.4.0 拆成 .hbars（柱，行 flex）+ .histax（轴标签行）。
+     ⚠️ 原先 .histax 被写在 .hist（display:flex 的柱容器）内部，
+     于是轴标签成了柱子的同级 flex 项，被挤成 74px 宽，三个年份标签
+     直接叠成「194019802020」。现在轴标签独占一行，用绝对定位对齐柱心。 */
+  .lctrl .mpane .histwrap{height:auto}
+  .lctrl .mpane .hbars{display:flex;align-items:flex-end;gap:2px;height:70px;padding-top:4px}
+  .lctrl .mpane .hbars .b{flex:1;border-radius:2px 2px 0 0;
+    background:linear-gradient(180deg,#4cc2ff,#1f6feb);min-height:1px;position:relative}
+  .lctrl .mpane .histax{position:relative;height:14px;font-size:10.5px;color:var(--dim2);
+    margin-top:4px}
+  .lctrl .mpane .histax span{position:absolute;top:0;white-space:nowrap}
+  /* v1.3.0 量纲警示：台网近期数据只覆盖几天，却与历史「全年」计数同轴绘制，
+     会在末端顶出一根异常高的柱子。不写明就会读成「地震变多了」。 */
+  .lctrl .mpane .ywarn{font-size:10.5px;line-height:1.5;color:#ffb454;
+    background:rgba(255,180,84,.10);border:1px solid rgba(255,180,84,.28);
+    border-radius:5px;padding:5px 7px;margin-top:6px}
+  .lctrl .mpane .ywarn b{color:#ffd08a;font-weight:600}
+
+  /* ============ 图层面板内嵌图例（v2.1.0：原独立 mlegend 浮层并入此处） ============ */
+  .lctrl .leg{padding:11px 14px 13px}
+  .lctrl .leg .lt2{font-size:10.5px;color:var(--dim2);margin:0 0 4px;letter-spacing:.5px}
+  .lctrl .leg .lg{display:flex;align-items:center;gap:8px;padding:2.5px 0;
+    font-size:11.5px;color:#dde5ed;line-height:1.3}
+  .lctrl .leg .lg .sw{width:22px;height:0;border-top-width:2.5px;border-top-style:solid;
+    flex:0 0 22px}
+  /* 图例色标与地图实际绘制对齐（此前图例在说谎）——
+     ① 行政边界：地图是「白底衬 w4/op.9 + 红主线 #ff2d2d w2.4/op1 +
+        浅红填充 op.07」，图例同步为红色实线；
+     ② 活动断裂：地图是三层（深底 + 暖晕 #ffae73 + 亮红主线 #ff3b30），
+        图例原只有单根红线 → 加暖色柔光晕，宽度对齐主线 2.3px；
+     ③ 最大/最近地震：地图是 **fill:false 的虚线圆环**（dashArray 2,4），
+        图例原是实心圆点 → 改虚线圆环；
+     ④ 城市中心：地图是 #4cc2ff + 3px 白边 + 4px 外晕，
+        图例原用 accent(#4cc9ff) + 2px 白边 → 统一色值与线宽。 */
+  .lctrl .leg .lg .sw.bnd{border-top-color:#ff2d2d;border-top-style:solid;
+    border-top-width:2.5px;opacity:1}
+  /* 断裂色标要体现「三层叠绘」的视觉，但**不能**用 box-shadow ——
+     .sw 是 height:0 的横线，box-shadow 会把它撑成一个有背景的方块
+     （实测 border-radius 变 9px、尺寸 22×2 → 26×25）。
+     改用一层实心底衬（外扩的暖色）来表达柔光晕：
+     background 铺一条 4px 的暖色带 + border-top 画亮红主线。 */
+  .lctrl .leg .lg .sw.flt{border-top-color:#ff3b30;border-top-width:2.3px;
+    height:4px;background:rgba(255,174,115,.3);
+    background-clip:content-box;padding-top:2px}
+  .lctrl .leg .lg .c.ring{background:transparent;border-style:dashed;
+    border-width:2.5px;box-shadow:none}
+  .lctrl .leg .lg .dot{width:11px;height:11px;border-radius:50%;flex:0 0 11px;
+    box-shadow:0 0 0 1.5px rgba(255,255,255,.85),0 1px 4px rgba(0,0,0,.6)}
+  .lctrl .leg .lg .dot.big{width:15px;height:15px;flex:0 0 15px}
+  .lctrl .leg .lg .c{width:14px;height:14px;border-radius:50%;flex:0 0 14px;
+    border:3px solid #fff;background:var(--accent);
+    box-shadow:0 0 0 4px rgba(76,194,255,.35)}
+
+  /* ============ 地图角标 ============ */
+  .mfoot{position:absolute;bottom:14px;right:16px;z-index:1050;
+    font-size:11.5px;color:rgba(230,237,243,.72);background:rgba(13,18,24,.82);
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,.09);border-radius:7px;padding:5px 10px;
+    letter-spacing:.3px}
+  .mfoot b{color:var(--accent);font-weight:600}
+  .mfoot .sep{color:rgba(255,255,255,.2);margin:0 7px}
+
+  /* ============ 地震图标（自定义 SVG 风格） ============ */
+  /* ⚠️ v3.5.0 修：.qk 原本是 width:0;height:0，于是 .halo/.core 的
+     left:50%/top:50% 落在 0×0 的框上 = 元素左上角，而 Leaflet 的
+     divIcon 元素左上角在锚点（左上）方向 17px（= iconSize/2）处，
+     结果 M≥6 标记整体偏移 (-17,-17) px，与「最大地震」虚线环错位。
+     现在让 .qk 铺满 divIcon 元素（iconSize 34×34），
+     50%/50% 即元素中心 = 锚点真值，光晕与内核同心。 */
+  .qk{position:relative;width:100%;height:100%}
+  .qk .halo,.qk .core{position:absolute;left:50%;top:50%;
+    transform:translate(-50%,-50%);border-radius:50%}
+  /* 外环：同色半透明细环 + 柔光，卫星影像上有「仪器感」而非廉价荧光 */
+  .qk .halo{width:calc(var(--r) * 3.4);height:calc(var(--r) * 3.4);
+    border:1.5px solid var(--c);opacity:.55;
+    box-shadow:0 0 11px -1px var(--c)}
+  /* 内核：径向渐变做出球面高光，中心偏亮、边缘饱和 */
+  .qk .core{width:var(--r);height:var(--r);
+    background:radial-gradient(circle at 34% 28%,
+      rgba(255,255,255,.85) 0%, rgba(255,255,255,.18) 18%, var(--c) 55%);
+    box-shadow:0 0 0 1.5px rgba(255,255,255,.92),
+      0 0 7px 1px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.55)}
+  .qk.big .halo{animation:qkpulse 2.6s cubic-bezier(.2,.6,.3,1) infinite}
+  @keyframes qkpulse{0%{transform:translate(-50%,-50%) scale(.55);opacity:.6}
+    70%{transform:translate(-50%,-50%) scale(1.25);opacity:0}
+    100%{transform:translate(-50%,-50%) scale(1.25);opacity:0}}
+  .maglab{background:none;border:none;box-shadow:none;color:#fff;
+    font-size:11px;font-weight:700;text-shadow:0 0 3px #000,0 0 3px #000,0 1px 2px #000}
+  .citydot{display:flex;align-items:center;justify-content:center}
+
+  /* ============ 最大 / 最近地震标注（v3.4.0） ============ */
+  /* 虚线环 + 永久胶囊标签，圈出代表性地震，与震级圆点区分且不随筛选隐藏 */
+  .qring{filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
+  .qann{background:rgba(13,18,24,.92);border:1px solid rgba(255,255,255,.28);
+    color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:9px;
+    box-shadow:0 2px 8px rgba(0,0,0,.5);white-space:nowrap;
+    text-shadow:0 1px 2px rgba(0,0,0,.6)}
+  .leaflet-tooltip.qann:before{display:none}
+
+  /* ============ Leaflet 皮肤 ============ */
+  .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#161d26;color:var(--fg);
+    border:1px solid rgba(255,255,255,.11);box-shadow:0 10px 30px rgba(0,0,0,.55)}
+  .leaflet-popup-content-wrapper{border-radius:9px}
+  .leaflet-popup-content{margin:11px 14px;font-size:13px;line-height:1.75}
+  .leaflet-popup-content b{color:#fff}
+  .leaflet-popup-content .k{color:var(--dim2)}
+  .leaflet-popup-content a{color:var(--accent)!important}
+  .leaflet-bar a{background:#161d26;color:var(--fg);border-color:rgba(255,255,255,.11)}
+  .leaflet-bar a:hover{background:#222b36;color:#fff}
+  .leaflet-control-attribution{background:rgba(13,18,24,.8)!important;color:#5f6b78!important;
+    font-size:11px!important}
+  .leaflet-control-attribution a{color:#7d8b99!important}
+  .leaflet-control-scale-line{background:rgba(13,18,24,.8);color:#dde5ed;
+    border-color:rgba(255,255,255,.35);font-size:11px;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  .leaflet-control-scale-line{border-left:2px solid rgba(255,255,255,.55);
+    border-bottom:2px solid rgba(255,255,255,.55);border-right:none;border-top:none}
+
+  /* ============ 窄屏自适应 ============ */
+  /* v1.8.0：侧栏加宽到 420px 后，断点同步上调到 1080px —— 否则
+     1280×800 这类常见笔记本宽度下地图区只剩 780px，左右浮层会挤在一起。 */
+  @media (max-width:1080px){
+    .app{flex-direction:column}
+    .side{width:100%;flex:0 0 auto;max-height:46%;height:auto}
+    .stage{flex:1 1 auto;min-height:54%}
+    /* v2.1.0：右侧列只放图层面板；分布面板移左下后同样要收窄 */
+    .mcol{width:206px;top:12px;right:12px;gap:9px}
+    .mfoot{font-size:10.5px;bottom:10px;right:12px}
+    .mstat{width:100%}
+    .mstat .mk{grid-template-columns:1fr 1fr;gap:6px;padding:8px 9px 6px}
+    .mstat .c .v{font-size:16.5px}
+  }
+  /* 窄屏下地图区被压矮（侧栏占 46%），概览面板（~295px）与分布面板（~200px）
+     叠加后超出地图区高度，必然重叠 —— 此时把概览面板压缩，
+     分布面板改为折叠，避免遮挡地图。 */
+  @media (max-width:1080px){
+    .mstat .mk{grid-template-columns:1fr 1fr}
+    .mstat .mrow .r{font-size:11px}
+    .mstat .cnote{display:none}
+    /* 矮屏图例压缩：只保留「地图要素」段的 4 行
+       （行政边界 / 活动断裂 / 最大地震 / 最近地震），
+       隐藏震级色标段与城市中心 —— 前者是判读地图的关键，后者在窄屏价值低。
+       ⚠️ v3.5.0 修：原规则按「从末尾数第 4 个及更靠前」匹配，
+       恰好把**要保留的 4 行**（行政边界/活动断裂/最大地震/最近地震）
+       连带震级色标前两行一起隐藏了（浏览器实测隐藏集 =
+       行政边界/活动断裂/最大地震/最近地震/M3.0–3.9/M4.0–4.9）。
+       现在按「.leg 内倒数第 6 个及更靠后 = 震级色标段 + 城市中心」
+       整段隐藏（.lt2 小标题也占位，用 > * 统一命中）。 */
+    .lctrl .leg > *:nth-last-child(-n+6){display:none}
+    .lctrl .leg{padding:6px 13px 8px}
+  }
+  /* 中等宽度（1080–1400px）：仍是左右分栏，但右侧列收窄一点，
+     给地图主体让出空间。 */
+  @media (min-width:1081px) and (max-width:1400px){
+    .mcol{width:224px}
+    .mstat{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ==================== 左侧信息栏 ==================== -->
+  <aside class="side">
+    <header class="hd">
+      <div class="eyebrow">Active Fault &amp; Seismic Map</div>
+      <h1>__CITY__ <em>断层与地震</em></h1>
+      <div class="meta">
+        <b>__PROVINCE__</b>　·　搜索半径 <b>__RADIUS__ km</b>　·　震级 <b>M ≥ __MINMAG__</b>
+      </div>
+      <div class="chips">
+        <span class="chip on">__BNAME__</span>
+        <span class="chip">断层 __NFAULTS__ 条</span>
+        <span class="chip">地震 __TOTAL__ 次</span>
+        <span class="chip scope">__SCOPECHIP__</span>
+      </div>
+    </header>
+
+    <div class="scroll">
+      <!-- v3.0.0：侧栏三个 tab（筛选 / 地震目录 / 断裂清单）----
+           原来三个 section 纵向堆叠 → 卡片多、要看的东西互相挤；
+           改成 tab 后一次只呈现一件事，交互路径最短。 -->
+      <div class="tabs" id="stabs">
+        <button type="button" class="tab on" data-tab="overview">概览</button>
+        <button type="button" class="tab" data-tab="quake">地震目录</button>
+        <button type="button" class="tab" data-tab="fault">断层清单</button>
+      </div>
+
+      <!-- ===== Tab 1：概览（统计 + 筛选） ===== -->
+      <div class="pane on" data-pane="overview">
+        <!-- 统计概览（由地图左上角迁入本 tab，与筛选同屏） -->
+        <div class="mstat" id="mstat">
+          <div class="mt">统计概览<span class="tag">__BNAME__</span></div>
+          <div class="mk">
+            <div class="c hi"><div class="k">历史地震</div>
+              <div class="v">__TOTAL__<small>次</small></div></div>
+            <div class="c"><div class="k">最大震级</div>
+              <div class="v">__MAXMAG__<small>M</small></div></div>
+            <div class="c"><div class="k">最深震源</div>
+              <div class="v">__DEEPEST__<small>km</small></div></div>
+            <div class="c am"><div class="k">活动断层</div>
+              <div class="v">__NFAULTS__<small>条 / __NSEGS__ 段</small></div></div>
+          </div>
+          <div class="mrow">
+            <div class="r"><b>统计范围</b><span class="v">__SCOPENOTE__</span></div>
+            <div class="r"><b>断层范围</b><span class="v">__FAULTSCOPENOTE__</span></div>
+            <div class="r"><b>时间跨度</b><span class="v">__YEARRANGE__</span></div>
+            <div class="r"><b>边界级别</b><span class="v">__BLEVELNAME__</span></div>
+            <div class="r"><b>边界来源</b><span class="v">__BSOURCE_SHORT__</span></div>
+            <div class="r"><b>地震来源</b><span class="v">__SRCNOTE__</span></div>
+            <div class="r"><b>震级口径</b><span class="v">__MAGSCALE__</span></div>
+            __MAXINTROW__
+            <span class="badge __COMP_CLS__">__COMPTITLE__</span>
+            <div class="cnote">__COMPLETE_NOTE__</div>
+          </div>
+        </div>
+
+        <h2 class="sh">地震筛选<span class="hint" id="qcount">全部</span></h2>
+        <div class="flt">
+          <div class="frow">
+            <label>震级下限</label>
+            <input type="range" id="fMagMin" min="0" max="8" step="0.5" value="0">
+            <b id="fMagMinV">0.0</b>
+          </div>
+          <div class="frow">
+            <label>震级上限</label>
+            <input type="range" id="fMagMax" min="0" max="8" step="0.5" value="8">
+            <b id="fMagMaxV">8.0</b>
+          </div>
+          <div class="frow">
+            <label>年代范围</label>
+            <input type="range" id="fYearMin" min="0" max="0" step="1" value="0">
+            <input type="range" id="fYearMax" min="0" max="0" step="1" value="0">
+            <b id="fYearV">—</b>
+          </div>
+          <div class="fchips" id="fMagChips"></div>
+          <div class="fbtns">
+            <button type="button" id="fReset">重置</button>
+            <button type="button" id="fBig">只看 M≥6</button>
+            <button type="button" id="fRecent">只看近 30 年</button>
+          </div>
+          <div class="fstat" id="fstat"><span>命中 <b>—</b></span></div>
+        </div>
+      </div>
+
+      <!-- ===== Tab 2：地震目录 ===== -->
+      <div class="pane" data-pane="quake" id="qsec">
+        <h2 class="sh">地震目录<span class="hint" id="qtabhint">点表头排序 · 点行定位</span></h2>
+        <div class="searchrow">
+          <input type="search" id="qsearch" placeholder="搜索日期 / 震级 / 地点 / 事件号（按 / 聚焦）">
+          <span class="cnt" id="qsearchcnt"></span>
+        </div>
+        <div class="tblwrap">
+          <table id="qtable"><thead><tr>
+            <th data-k="date">日期</th><th data-k="mag" class="n">震级</th>
+            <th data-k="depth" class="n">深度km</th><th data-k="dist">距中心</th>
+            <th data-k="scope">范围</th><th data-k="src">来源</th>
+          </tr></thead><tbody>__QROWS__</tbody></table>
+        </div>
+        <div class="tmore" id="qmore" hidden>
+          <button type="button" id="qmorebtn">显示更多</button>
+          <span class="tcount" id="qcount2"></span>
+        </div>
+        <div class="dlrow">
+          <span class="dltitle">导出当前筛选结果（坐标为 WGS84，可直接导入 GIS）</span>
+          <button type="button" class="dlbtn" id="dlQuakeJson"><span class="ico">⭳</span><span id="dlQuakeJsonN">GeoJSON</span></button>
+          <button type="button" class="dlbtn" id="dlQuakeCsv"><span class="ico">⭳</span><span id="dlQuakeCsvN">CSV 表格</span></button>
+        </div>
+      </div>
+
+      <!-- ===== Tab 3：断裂清单 ===== -->
+      <div class="pane fsec" data-pane="fault" id="fsec">
+        <h2 class="sh">断层清单<span class="hint" id="fhint">按名称去重 · 点行定位</span></h2>
+        <div class="searchrow">
+          <input type="search" id="fsearch" placeholder="搜索断层名称（按 / 聚焦）">
+          <span class="cnt" id="fsearchcnt"></span>
+        </div>
+        <p class="fhowto">
+          <b style="color:#4cc2ff">怎么读这两列：</b>
+          <b>活动方式</b>——这条断层让地面「怎么动」：拉张型是被拉长，挤压型是被压短，
+          水平错动型是两侧横向错开。
+          <b>最新活动年代</b>——这条断层<b>最后一次有地质活动</b>距今多久。
+          越近（如全新世）说明它越年轻、地壳活动越频繁，潜在地震危险性越高；
+          越老（如前第四纪）属古老基岩断裂，一般不具活动性。
+        </p>
+        <div class="tblwrap" id="fwrap">
+          <table id="ftable"><thead><tr>
+            <th>断层名称</th><th>活动方式</th><th>最新活动年代</th>
+          </tr></thead><tbody>__FAULTROWS__</tbody></table>
+        </div>
+        <div class="tmore" id="fmore" hidden>
+          <button type="button" id="fmorebtn">展开全部</button>
+          <span class="tcount" id="fcount2"></span>
+        </div>
+        <div class="dlrow">
+          <span class="dltitle">导出全部断层（不受震级筛选影响；坐标为 WGS84）</span>
+          <button type="button" class="dlbtn" id="dlFaultJson"><span class="ico">⭳</span><span id="dlFaultJsonN">GeoJSON</span></button>
+          <button type="button" class="dlbtn" id="dlFaultCsv"><span class="ico">⭳</span><span id="dlFaultCsvN">CSV 表格</span></button>
+        </div>
+      </div>
+
+      <div class="foot">
+        <b>数据源</b>　断层：中国活断层数据库 CAFDv2023 ｜ 地震：国家地震台网 CENC（近期·中文地名）＋ USGS FDSNWS（历史兜底）<br>
+        <b>边界</b>　__BSOURCE__（仅供范围示意，非法定界线）<br>
+        <b>底图</b>　高德卫星影像 ｜ <b>坐标系</b>　GCJ-02（断层与地震已做 WGS84 偏移）
+      </div>
+    </div>
+  </aside>
+
+  <!-- ==================== 右侧地图区 ==================== -->
+  <main class="stage">
+    <div id="map"></div>
+
+    <!-- 右侧浮层列：v2.1.0 起只放图层面板（含内嵌图例）。
+         分布面板移到左下，与左上概览形成对角平衡，把地图中央还给地图。 -->
+    <!-- v3.4.0：右上面板取消 tab，【图层 / 分布 / 图例】三段常驻展开，
+         一次看全，省去切来切去；统计概览已迁入左侧栏「概览」tab。 -->
+    <div class="mcol" id="mcol">
+    <div class="lctrl" id="lctrl">
+      <!-- ① 图层 -->
+      <div class="mpane on" data-mpane="layer">
+        <div class="lt">图层<span class="cnt" id="lcnt"></span></div>
+        <div class="lb" id="lbody"></div>
+        <div class="lr">
+          <button type="button" id="lall">全选</button>
+          <button type="button" id="lnone">全不选</button>
+        </div>
+      </div>
+
+      <!-- ② 分布 -->
+      <div class="mpane" data-mpane="chart">
+        <div class="ct">分布<span class="cnt">__TOTAL__ 次</span></div>
+        <div class="cb">
+          <div class="sub">震级分布</div>
+          <table><thead><tr><th>震级</th><th class="n">次数</th><th style="width:52px">占比</th></tr></thead><tbody>
+            __MAGROWS__
+          </tbody></table>
+          <div class="sub">年代分布</div>
+          <div class="histwrap">__YEARHIST__</div>
+          __YEARSCALEWARN__
+        </div>
+      </div>
+
+      <!-- ③ 图例 -->
+      <!-- 图例色标改为**与地图实际绘制一致**（此前图例在说谎）：
+           ① 行政边界地图为「白底衬 + 红主线 #ff2d2d + 浅红填充」，图例同步为红色实线；
+           ② 活动断裂地图为**三层**（深底 + 暖晕 + 亮红主线）
+              → 图例也为「主线 + 柔光晕」双层色标；
+           ③ 最大/最近地震地图为**虚线圆环**（fill:false）→ 图例也为虚线圆环；
+           ④ 城市中心地图为 #4cc2ff 且带白边 → 图例统一为 #4cc2ff。
+           图例中**不存在**已下线的「带」类要素项
+           （v3.4.0 已整链下线），并新增自检断言锁死这一点。 -->
+      <div class="mpane" data-mpane="legend">
+        <div class="leg">
+          <div class="lt2">地图要素</div>
+          <div class="lg"><span class="sw bnd"></span>行政边界（统计范围）</div>
+          <div class="lg"><span class="sw flt"></span>活动断层</div>
+          <div class="lg"><span class="c ring" style="border-color:#ffd43b"></span>最大地震</div>
+          <div class="lg"><span class="c ring" style="border-color:#4cc2ff"></span>最近地震</div>
+          <div class="lt2">地震震级</div>
+          <div class="lg"><span class="dot" style="background:#ffd43b"></span>M 3.0 – 3.9</div>
+          <div class="lg"><span class="dot" style="background:#ff922b"></span>M 4.0 – 4.9</div>
+          <div class="lg"><span class="dot" style="background:#ff6b6b"></span>M 5.0 – 5.9</div>
+          <div class="lg"><span class="dot big" style="background:#f06595"></span>M ≥ 6.0（外环脉冲）</div>
+          <div class="lg"><span class="c" style="background:#4cc2ff"></span>城市中心</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- 数据源角标（右下，v2.1.0 补 id 便于自动化验证） -->
+    <div class="mfoot" id="mfoot">断层 <b>CAFDv2023</b><span class="sep">|</span>地震 <b>USGS FDSNWS</b><span class="sep">|</span>边界 <b>__BSOURCE_SHORT__</b></div>
+  </main>
+</div>
+<script>
+var FAULTS = __FAULTS__;
+var QUAKES  = __QUAKES__;
+var CENTER  = __CENTER__;
+var CITY    = __CITYJSON__;
+var BOUNDARY = __BOUNDARY__;
+// 断裂「最新活动年代」代码 → 通俗中文
+// Qh=全新世, Qp*=更新世, Pre-Q=前第四纪（第四纪前的古老基岩断层）
+var AGE_CN = {
+  'Qh':'全新世（约 1 万年前至今）',
+  'Qh2':'全新世早段（约 1 万–8 千年前）',
+  'Qh3':'全新世晚段（约 8 千–1 万年前）',
+  'Qp1+2':'早—中更新世（约 13 万–260 万年前）',
+  'Qp1':'早更新世（约 130 万–260 万年前）',
+  'Qp2':'中更新世（约 21 万–130 万年前）',
+  'Qp3':'晚更新世（约 1.3 万–21 万年前）',
+  'Qp31':'晚更新世早段（约 8 万–13 万年前）',
+  'Qp32':'晚更新世晚段（约 1.3 万–8 万年前）',
+  'Qp':'更新世（约 1.2 万–260 万年前）',
+  'Q':'第四纪（约 260 万年前至今）',
+  'Pre-Q':'前第四纪（260 万年前，属古老基岩断层）',
+  '':'未标注'
+};
+// 断裂「性质」→ 通俗中文（地质学分类的专业术语对非专业用户不友好）
+var KIND_CN = {
+  '正断':'拉张型（地层被拉长，多为伸展构造）',
+  '逆断':'挤压型（地层被压缩并抬升）',
+  '走滑':'水平错动型（两侧地块横向相对滑动）',
+  '左旋':'水平左旋错动',
+  '右旋':'水平右旋错动',
+  '左旋逆断':'左旋 + 挤压',
+  '右旋逆断':'右旋 + 挤压',
+  '左旋正断':'左旋 + 拉张',
+  '右旋正断':'右旋 + 拉张',
+  '走滑逆断':'水平错动 + 挤压',
+  '隐伏正断':'隐伏拉张型（地下未出露）',
+  '隐伏性质未知':'隐伏断层，性质不明',
+  '推测性质未知':'推测存在，性质不明',
+  '出露性质未知':'地表出露，性质不明'
+};
+function ageText(code){
+  if(code==null || code==='') return AGE_CN[''];
+  if(AGE_CN[code]) return AGE_CN[code];
+  return code + '（地质年代代码）';
+}
+function kindText(code){
+  if(code==null || code==='') return '未标注';
+  if(KIND_CN[code]) return KIND_CN[code];
+  return code;
+}
+</script>
+<script>
+function initMap(){
+
+var amapSat = L.tileLayer(
+  'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
+  {subdomains:'1234', maxZoom:18, attribution:'高德卫星影像'});
+var amapLabel = L.tileLayer(
+  'https://webst0{s}.is.autonavi.com/appmaptile?style=8&x={x}&y={y}&z={z}',
+  {subdomains:'1234', maxZoom:18, opacity:0.42});
+
+var map = L.map('map', {center:CENTER, zoom:9, zoomControl:true,
+  maxBounds:[[10,70],[60,140]], attributionControl:true});
+amapSat.addTo(map);
+amapLabel.addTo(map);
+
+// 初始视野收口到行政边界（v1.8.0）。
+// 只展示市域内地震点时，固定 zoom=9 会让「视野范围」与「数据范围」
+// 对不上：大城市的点全挤在中心一小块，小城市则连边界都出屏。
+// 有边界就 fitBounds（留 24px 边距给浮层），没有才退回固定 zoom。
+if (BOUNDARY && BOUNDARY.rings && BOUNDARY.rings.length) {
+  var bb = L.latLngBounds([]);
+  BOUNDARY.rings.forEach(function(ring){
+    ring.forEach(function(p){ bb.extend(L.latLng(p[1], p[0])); });
+  });
+  if (bb.isValid()) { map.fitBounds(bb, {padding:[24, 24], animate:false}); }
+}
+
+// 行政边界：清晰红色（白底衬 + 红主线 + 浅红填充），明确标示统计范围
+// 单独建一个高层 pane（zIndex 500，位于 overlayPane=400 之上、marker=600 之下），
+// 使边界线始终压在密集地震点之上可见 —— 汶川这类上千条地震的城市
+// 若用默认 overlayPane，边界会被圆点完全淹没。
+map.createPane('boundaryPane');
+map.getPane('boundaryPane').style.zIndex = 500;
+var boundaryLayer = L.layerGroup().addTo(map);
+if (BOUNDARY && BOUNDARY.rings && BOUNDARY.rings.length) {
+  BOUNDARY.rings.forEach(function(ring){
+    var latlng = ring.map(function(p){return [p[1],p[0]];});
+    // 行政边界：清晰红色，明确标示统计范围。
+    // 白底衬（任意底图上都可辨）+ 红色主线 + 浅红填充，三层叠绘保证醒目。
+    L.polygon(latlng, {
+      color:'#ffffff', weight:4, opacity:.9, fill:false,
+      lineCap:'round', lineJoin:'round', pane:'boundaryPane', interactive:false
+    }).addTo(boundaryLayer);
+    L.polygon(latlng, {
+      color:'#ff2d2d', weight:2.4, opacity:1, fillColor:'#ff2d2d',
+      fillOpacity:.07, lineCap:'round', lineJoin:'round', pane:'boundaryPane',
+      interactive:false
+    }).addTo(boundaryLayer);
+  });
+  // 交互用的透明捕获层单独放在低 pane，不干扰描边可见性
+  BOUNDARY.rings.forEach(function(ring){
+    var latlng = ring.map(function(p){return [p[1],p[0]];});
+    L.polygon(latlng, {color:'#ffffff', weight:8, opacity:0, fill:false})
+      .addTo(boundaryLayer).bindPopup(
+        '<b>'+BOUNDARY.name+'</b><br>'+
+        '<span class="k">行政级别：</span>'+BOUNDARY.level_name+'<br>'+
+        '<span class="k">数据来源：</span>'+BOUNDARY.source);
+  });
+}
+
+
+// 断裂带：深色底描边 + 亮红主线 + 沿线虚线光晕，三层叠加
+// 目的是在卫星影像与路网注记之上既有清晰的「带」感，又有发光质感
+// ⚠️ 断裂**不要用 Canvas 渲染器**（v2.0.0 实测放弃方案，勿再尝试）：
+// 把三层改走 Canvas 渲染器后，DOM 从 2374 个 <path> 降到 1 个 canvas，
+// 但**点击弹窗失效** —— 同一坐标在 SVG 版本能弹出断裂详情、canvas 版本
+// 完全无反应（无报错）。逐项排除过：
+//   ① 换独立 pane（faultPane 400，与默认 SVG 分开）→ 仍失效；
+//   ② 去掉 padding:0.3 → 仍失效；
+//   ③ tolerance 8（_clickTolerance = weight/2 + tolerance）→ 仍失效，
+//      页面内直调 layer._containsPoint(pt) 返回 false。
+// 诊断到的事实：elementFromPoint 命中的确实是断裂 canvas（能收到事件），
+// 但 Canvas 的命中测试判 false。地震点的 circleMarker 走 canvas 完全正常
+// （_containsPoint 用圆心+半径），说明问题出在**折线**的命中路径上。
+// 结论：DOM 收益（汶川 3656→1284）买不回「点不开断裂详情」的代价，回退。
+// 大 DOM 问题改由目录表分页 + 地震点分级解决，这两项都不碰交互。
+var faultLayer = L.layerGroup().addTo(map);
+FAULTS.forEach(function(f){
+  var latlng = f.coords.map(function(p){return [p[1],p[0]];});
+  // 第 1 层：深色细描边（对比衬底，比旧版更克制，避免「黑粗线」抢戏）
+  L.polyline(latlng, {color:'#0b0f14', weight:5.0, opacity:.42,
+    lineCap:'round', lineJoin:'round', interactive:false}).addTo(faultLayer);
+  // 第 2 层：暖色柔光晕，卫星影像上更自然的「发光活动断裂」质感
+  L.polyline(latlng, {color:'#ffae73', weight:4.2, opacity:.26,
+    lineCap:'round', lineJoin:'round', interactive:false}).addTo(faultLayer);
+  // 第 3 层：亮红主线（清晰、饱和，作视觉主体）
+  // __fname 供「断裂清单 hover 高亮」按名称反查该断裂的所有段（v2.1.0 交互联动）
+  // 兜底名必须与 Python 端 grouped 的 key 一致（f["name"] or "未命名断裂"），
+  // 否则 hover 那一行会高亮不到任何一段（实测踩过：段上是 ''、行上是「未命名断裂」）。
+  var mainLine = L.polyline(latlng, {color:'#ff3b30', weight:2.3, opacity:1.0,
+    lineCap:'round', lineJoin:'round'});
+  mainLine.__fname = f.name || '未命名断裂';
+  mainLine.addTo(faultLayer)
+    // v1.1.0：补「所属断裂带」与「资料来源」。ref 在断库里 100% 有值
+    // （如 "UAFS:Qingdao"、"SMCAR; Xu et al., 2016"），是断层可溯源性的
+    // 唯一依据，此前解析出来就被丢弃了 —— 断层是「谁测的」必须可查。
+    .bindPopup('<b>'+ (f.name||'未命名断裂')+'</b><br>'+
+      (f.en_name? '<i>'+f.en_name+'</i><br>':'')+
+      '<span class="k">活动方式：</span>'+kindText(f.kind)+'<br>'+
+      '<span class="k">最新活动年代：</span>'+ageText(f.age)+
+      (f.zone? '<br><span class="k">所属断裂带：</span>'+f.zone:'')+
+      (f.ref? '<br><span class="k">资料来源：</span>'+f.ref:''));
+});
+
+// 地震：自定义标记（发光外环 + 实心核 + 白色描边），M≥6 加脉冲外环
+function magColor(m){ return m>=6?'#f06595' : m>=5?'#ff6b6b' : m>=4?'#ff922b':'#ffd43b'; }
+function magRadius(m){ return m>=6?8.5 : m>=5?7.4 : m>=4?6.2 : 5; }
+function quakeIcon(m){
+  var r = magRadius(m);
+  var big = m>=6;
+  var html = '<div class="qk'+(big?' big':'')+'" style="--c:'+magColor(m)+
+    ';--r:'+r+'px"><span class="halo"></span><span class="core"></span></div>';
+  var s = big ? 34 : 26;
+  return L.divIcon({className:'', html:html, iconSize:[s,s], iconAnchor:[s/2,s/2]});
+}
+var quakeLayer = L.layerGroup().addTo(map);
+
+// USGS 详情页链接由 event id 拼出，不落盘 —— 实测汶川 1268 次事件
+// 的 url 字段要占 76.8 KB，而这个串对每个事件都是同一个前缀。
+// v1.1.0：三处地震弹窗（图层点 / 最大与最近地震环 / 目录行点击）原本各自
+// 拼一段 HTML，字段一多就必然不一致（加了烈度只改一处 = 另外两处静默缺失）。
+// 统一到这一个函数：口径、烈度、来源、审定状态一次写全。
+function srcText(q){ return q.source==='CENC' ? '国家台网 CENC' : 'USGS'; }
+function magScaleText(q){
+  // 中文口径名由 Python 落盘（mag_type_cn），此处不再维护第二份映射表
+  if(q.mag_type_cn) return q.mag_type_cn;
+  if(q.source==='CENC') return '中国台网测定（未标注量规）';
+  return '未标注';
+}
+function quakePopupHtml(q, head){
+  var d = new Date(q.time);
+  var ymd = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+
+            String(d.getUTCDate()).padStart(2,'0');
+  return (head? '<b>'+head+'</b><br>':'')+
+    '<b>M '+q.mag.toFixed(1)+'</b>　'+ymd+'<br>'+
+    (q.place? q.place+'<br>':'')+
+    '<span class="k">震级口径：</span>'+magScaleText(q)+'<br>'+
+    '<span class="k">震源深度：</span>'+(q.depth!=null? q.depth+' km':'—')+'<br>'+
+    (q.intensity!=null? '<span class="k">震中烈度：</span>'+q.intensity+' 度<br>':'')+
+    '<span class="k">距中心：</span>'+q.dist_km+' km<br>'+
+    '<span class="k">来源：</span>'+srcText(q)+
+    (q.status==='automatic'
+      ? '　<span style="color:#ff922b">自动测定（未人工核定）</span>' : '')+
+    (quakeUrl(q)? '<br><a href="'+quakeUrl(q)+'" target="_blank">USGS 详情页 ↗</a>':'');
+}
+function quakeUrl(q){
+  return q && q.id ? ('https://earthquake.usgs.gov/earthquakes/eventpage/'+q.id) : '';
+}
+// ---- 地震点分级渲染（v2.0.0）----
+//
+// 实测汶川 1268 次地震：每个点一个 divIcon marker = 1268 个 DOM 节点
+// （整页 14412 个），而其中 M≥6 的只有 13 个。
+// 所以：
+//   M≥6（少数、视觉主体）→ 保留 divIcon（发光外环 + 内核高光）；
+//   其余               → L.circleMarker + **默认 SVG 渲染器**。
+//
+// ⚠️ 不要改用 Canvas 渲染器（v2.0.0 实测放弃方案，勿再尝试）：
+// Leaflet 的 CSS 只给 `svg path.leaflet-interactive` 设了 pointer-events:auto，
+// **canvas 元素整块都是 auto** —— 全屏的地震点 canvas（markerPane 600）会把
+// 下层的活动断裂整片挡住，点击断裂不再弹窗（无报错，极难发现）。
+// 我最初误判成「断裂 canvas 化的问题」，实际是地震点 canvas 挡的：
+// 同一坐标下 v1.9.0（全 SVG）能弹出断裂详情，加了地震点 canvas 后失效。
+// SVG 容器的 pointer-events 是 none，只有圆点本身那几像素拦截事件；
+// DOM 也从 divIcon 的每点 3~4 个节点降到 1 个 <circle>。
+var QUAKE_DIVICON_MIN_MAG = 6.0;
+var QUAKE_LABEL_MIN_MAG = 5.0;   // 低于此震级不建永久标签（数量太大）
+var quakeBigLayer  = L.layerGroup().addTo(quakeLayer);   // M≥6：divIcon
+var quakeDotLayer  = L.layerGroup().addTo(quakeLayer);   // 其余：circleMarker
+
+var quakeLabels = [];
+// 每个地震一个独立 marker + 记录其属性，筛选时按属性显隐
+var quakeItems = [];
+QUAKES.forEach(function(q){
+  var d = new Date(q.time);
+  var ymd = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+
+            String(d.getUTCDate()).padStart(2,'0');
+  var label = 'M '+q.mag.toFixed(1);
+  var popupHtml = quakePopupHtml(q, '');
+  var big = q.mag >= QUAKE_DIVICON_MIN_MAG;
+  var marker = big
+    ? L.marker([q.lat,q.lon], {icon:quakeIcon(q.mag), riseOnHover:true,
+        keyboard:false, zIndexOffset: q.mag>=6 ? 1000 : (q.mag>=5 ? 400 : 0)})
+    : L.circleMarker([q.lat,q.lon], {
+        // **不要**加 renderer —— 用默认 SVG。给 canvas 会把下层的断裂挡住，
+        // 详见上面「地震点也不要用 Canvas 渲染器」的放弃方案记录。
+        pane:'markerPane',
+        radius: Math.max(3.2, magRadius(q.mag) * 0.62),
+        color:'#ffffff', weight:1, opacity:.85,
+        fillColor: magColor(q.mag), fillOpacity:.92,
+        zIndexOffset: q.mag>=5 ? 400 : 0});
+  var home = big ? quakeBigLayer : quakeDotLayer;
+  marker.addTo(home).bindPopup(popupHtml);
+  // 永久标签只在 M≥LABEL_MIN_MAG 且 zoom≥11 时出现：汶川 1268 个标签
+  // 在低缩放级别会挤成一团，且每个标签都是 DOM 节点。
+  var lbl = q.mag >= QUAKE_LABEL_MIN_MAG
+    ? L.tooltip({permanent:true, direction:'center', className:'maglab'})
+        .setContent(label).setLatLng([q.lat,q.lon])
+    : null;
+    if (lbl){
+      lbl.__qi = quakeItems.length;      // 供 zoomend 判断是否被筛掉
+      if (map.getZoom() >= 11) lbl.addTo(quakeLayer);
+      quakeLabels.push(lbl);
+    }
+  quakeItems.push({q:q, marker:marker, label:lbl, home:home, on:true,
+    ymd:ymd, bin:Math.floor(q.mag), year:d.getUTCFullYear()});
+});
+
+// 显隐必须走「该 marker 自己的分组」：divIcon 归 quakeBigLayer、
+// 小震圆点归 quakeDotLayer，混在一起会让批量控制失效。
+// 若统一 addTo(quakeLayer) 会把它们从 canvas 分组里拎出来，
+// 分组的意义（批量控制 canvas 图层）随之失效。
+function quakeShow(it){
+  if(!it.on){ it.home.addLayer(it.marker); it.on = true; }
+  if(it.label && map.getZoom()>=11 && !map.hasLayer(it.label)){
+    it.label.addTo(quakeLayer);
+  }
+}
+function quakeHide(it){
+  if(it.on){ it.home.removeLayer(it.marker); it.on = false; }
+  if(it.label && map.hasLayer(it.label)) quakeLayer.removeLayer(it.label);
+}
+
+// 城市中心
+L.marker(CENTER, {icon:L.divIcon({className:'citydot',
+  html:'<div style="width:14px;height:14px;border-radius:50%;border:3px solid #fff;'+
+    'background:#4cc2ff;box-shadow:0 0 0 4px rgba(76,194,255,.35)"></div>',
+  iconSize:[14,14], iconAnchor:[7,7]})})
+  .addTo(map).bindPopup('<b>'+CITY+'</b><br><span class="k">研究区中心点</span>');
+
+// 最大地震 & 最近地震标注（v3.4.0：用户要求在地图上明确标出）
+// 用虚线环 + 永久胶囊标签圈出位置，与既有震级圆点区分，且不随震级筛选隐藏。
+var specialLayer = L.layerGroup().addTo(map);
+(function(){
+  if(!QUAKES.length) return;
+  var maxQ = QUAKES[0], recentQ = QUAKES[0];
+  QUAKES.forEach(function(q){
+    if(q.mag > maxQ.mag) maxQ = q;
+    if(q.time > recentQ.time) recentQ = q;
+  });
+  function markSpecial(q, kind){
+    var d = new Date(q.time);
+    var ymd = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+
+              String(d.getUTCDate()).padStart(2,'0');
+    var color = kind==='max' ? '#ffd43b' : '#4cc2ff';
+    L.circleMarker([q.lat,q.lon], {
+      pane:'markerPane', radius:13, color:color, weight:3, opacity:.95,
+      fill:false, dashArray:'2,4', className:'qring', interactive:true
+    }).addTo(specialLayer).bindPopup(
+      quakePopupHtml(q, kind==='max'?'最大地震':'最近地震'));
+    L.tooltip({permanent:true, direction:'top', className:'qann', offset:[0,-14]})
+      .setContent(kind==='max' ? ('最大 M'+q.mag.toFixed(1)) : ('最近 '+ymd))
+      .setLatLng([q.lat,q.lon]).addTo(specialLayer);
+  }
+  markSpecial(maxQ, 'max');
+  if(recentQ !== maxQ) markSpecial(recentQ, 'recent');
+})();
+
+// 比例尺（图形比例尺，非纯数字）
+L.control.scale({metric:true, imperial:false, position:'bottomleft'}).addTo(map);
+
+/* ================= 右上角图层控制：全部多选 =================
+   不用 Leaflet 默认的 L.control.layers —— 它对底图是 radio 单选、
+   对叠加层才是 checkbox。这里自建面板，所有图层统一为 checkbox，
+   可任意组合（含同时叠加卫星影像 + 影像注记）。 */
+var LAYER_ITEMS = [
+  {id:'sat',  name:'高德卫星影像', sub:'底图 · 影像', c:'#5b8def',
+   sw:'border-color:#5b8def', on:true},
+  {id:'label',name:'影像注记',     sub:'路网与地名', c:'#aab8c6',
+   sw:'border-color:#aab8c6', on:true},
+  {id:'bnd',  name:'行政边界',     sub:'统计范围', c:'#ff2d2d',
+   sw:'border-color:#ff2d2d;border-top-style:solid', on:true},
+  {id:'flt',  name:'活动断层',     sub:'CAFDv2023', c:'#ff3b30',
+   sw:'border-color:#ff3b30', on:true},
+  {id:'qk',   name:'历史地震',     sub:'M ≥ __MINMAG__', c:'#ff922b',
+   dot:'background:#ff922b', on:true}
+];
+var LAYER_REF = {
+  sat: amapSat, label: amapLabel, bnd: boundaryLayer,
+  flt: faultLayer, qk: quakeLayer
+};
+var lbody = document.getElementById('lbody');
+LAYER_ITEMS.forEach(function(it){
+  var el = document.createElement('label');
+  el.className = it.on ? 'on' : 'off';
+  el.setAttribute('data-id', it.id);
+  // 每行的主题色：hover 色条与开启态开关都用它，
+  // 让「这条开关控制哪个视觉元素」一眼可辨。
+  el.style.setProperty('--lc', it.c);
+  var mark = it.dot
+    ? '<span class="dot" style="'+it.dot+'"></span>'
+    : '<span class="sw" style="'+it.sw+'"></span>';
+  el.innerHTML = '<span class="tg"><i></i></span>'+mark+
+    '<span class="t"><b>'+it.name+'</b><u>'+it.sub+'</u></span>';
+  el.addEventListener('click', function(ev){
+    ev.preventDefault();
+    // 用显式相等判断，别用 className.indexOf('on') —— 'off' 与 'on' 语义
+    // 相反却只差一个字符，子串判断改样式时极易写错。
+    setLayer(it.id, el.className !== 'on');
+  });
+  lbody.appendChild(el);
+});
+function setLayer(id, on){
+  var it = LAYER_ITEMS.filter(function(x){return x.id===id;})[0];
+  if(!it) return;
+  var el = lbody.querySelector('[data-id="'+id+'"]');
+  if(on){ el.className='on'; LAYER_REF[id].addTo(map); }
+  else  { el.className='off'; map.removeLayer(LAYER_REF[id]); }
+  it.on = on;
+  updateCount();
+}
+function updateCount(){
+  var n = LAYER_ITEMS.filter(function(x){return x.on;}).length;
+  document.getElementById('lcnt').textContent = n+'/'+LAYER_ITEMS.length+' 显示';
+  // 底图至少保留一层，否则地图全空白
+  var baseOn = LAYER_ITEMS.filter(function(x){
+    return x.on && (x.id==='sat' || x.id==='label');}).length;
+  if(baseOn===0) setLayer('sat', true);
+}
+document.getElementById('lall').addEventListener('click', function(){
+  LAYER_ITEMS.forEach(function(x){ setLayer(x.id, true); });
+});
+document.getElementById('lnone').addEventListener('click', function(){
+  // 底图不能全关，先关叠加层
+  ['bnd','flt','qk'].forEach(function(id){ setLayer(id, false); });
+});
+updateCount();
+
+// 缩放级别变化时按阈值显示/隐藏永久震级标签
+var lastZoom = map.getZoom();
+map.on('zoomend', function(){
+  var z = map.getZoom();
+  if ((z>=11) === (lastZoom>=11)) { lastZoom = z; return; }
+  lastZoom = z;
+  quakeLabels.forEach(function(l){
+    if(!l) return;                       // 防御：数组里不应有空值
+    var it = l.__qi;                     // 标签所属事件（用于遵守筛选）
+    var vi = it != null && window.__quakeVisible
+      ? window.__quakeVisible[it] !== false : true;
+    if (z>=11 && vi) { if (!map.hasLayer(l)) l.addTo(quakeLayer); }
+    else { if (map.hasLayer(l)) quakeLayer.removeLayer(l); }
+  });
+});
+
+/* ================= 地震点位筛选 =================
+   筛选同时作用于：地图上的地震标记、永久震级标签、左侧目录表行。
+   目录表的行与 quakeItems 一一对应（按 date/mag 排序前的原始顺序），
+   所以筛选时用 data-i 索引回溯到对应 marker。 */
+(function(){
+  var elMin = document.getElementById('fMagMin');
+  var elMax = document.getElementById('fMagMax');
+  var elYMin = document.getElementById('fYearMin');
+  var elYMax = document.getElementById('fYearMax');
+  var vMin = document.getElementById('fMagMinV');
+  var vMax = document.getElementById('fMagMaxV');
+  var vY = document.getElementById('fYearV');
+  var chipBox = document.getElementById('fMagChips');
+  var cnt = document.getElementById('qcount');
+  var bReset = document.getElementById('fReset');
+  var bBig = document.getElementById('fBig');
+  var bRecent = document.getElementById('fRecent');
+  if(!elMin || !chipBox) return;
+
+  var tbl = document.getElementById('qtable');
+  var tbody = tbl ? tbl.querySelector('tbody') : null;
+  // 行不再一次性取全（分页后只渲染当前页），筛选改为通知表格重渲染
+
+  // 震级档位：由数据动态生成（M3+ / M4+ / M5+ / M6+ ...）
+  var bins = [];
+  quakeItems.forEach(function(it){ if(bins.indexOf(it.bin)<0) bins.push(it.bin); });
+  bins.sort(function(a,b){return b-a;});
+  var chipState = {};
+  bins.forEach(function(b){ chipState[b] = true; });
+
+  // 档位标签：只有最高档用「M x+」，其余显示区间「M x–x+1」。
+  // （曾误写成 b>=最小档，因所有 b 都满足，结果全变成「+」形式）
+  function chipLabel(b){
+    if(b === bins[0]) return 'M '+b+'+';
+    return 'M '+b+'–'+(b+1);
+  }
+  bins.forEach(function(b){
+    var c = document.createElement('span');
+    c.className = 'fchip on';
+    c.textContent = chipLabel(b);
+    c.style.background = magColor(b);
+    c.title = '只显示 M '+b+' 档（含 M'+b+'–'+(b+1)+'）';
+    c.addEventListener('click', function(){
+      chipState[b] = !chipState[b];
+      c.className = chipState[b] ? 'fchip on' : 'fchip';
+      // v3.5.0 修：原先只在关闭时清空 background，重新打开时**不恢复**，
+      // 于是 chip 变成透明底 + 近黑文字（实测 bgAfterOn=""，
+      // computedBg=rgba(255,255,255,.04)），几乎不可读。
+      // 现在按状态双向同步背景色。
+      c.style.background = chipState[b] ? magColor(b) : '';
+      apply();
+    });
+    chipBox.appendChild(c);
+  });
+
+  // 年代滑块范围由数据决定
+  var years = quakeItems.map(function(it){return it.year;}).filter(function(y){return !isNaN(y);});
+  var y0 = years.length ? Math.min.apply(null, years) : 1900;
+  var y1 = years.length ? Math.max.apply(null, years) : new Date().getFullYear();
+  elYMin.min = y0; elYMin.max = y1; elYMin.value = y0;
+  elYMax.min = y0; elYMax.max = y1; elYMax.value = y1;
+
+  // 震级滑块范围由数据决定
+  var mags = quakeItems.map(function(it){return it.q.mag;});
+  var m0 = mags.length ? Math.floor(Math.min.apply(null, mags)*2)/2 : 0;
+  var m1 = mags.length ? Math.ceil(Math.max.apply(null, mags)*2)/2 : 8;
+  elMin.min = m0; elMin.max = m1; elMin.value = m0;
+  elMax.min = m0; elMax.max = m1; elMax.value = m1;
+
+  function state(){
+    return {
+      mMin: parseFloat(elMin.value),
+      mMax: parseFloat(elMax.value),
+      yMin: parseInt(elYMin.value, 10),
+      yMax: parseInt(elYMax.value, 10)
+    };
+  }
+
+  function pass(it, st){
+    if(it.q.mag < st.mMin - 1e-9 || it.q.mag > st.mMax + 1e-9) return false;
+    if(it.year && (it.year < st.yMin || it.year > st.yMax)) return false;
+    if(!chipState[it.bin]) return false;
+    return true;
+  }
+
+  var visible = new Array(quakeItems.length);
+
+  function apply(){
+    var st = state();
+    if(st.mMin > st.mMax){ var t=st.mMin; st.mMin=st.mMax; st.mMax=t; }
+    if(st.yMin > st.yMax){ var t2=st.yMin; st.yMin=st.yMax; st.yMax=t2; }
+    vMin.textContent = st.mMin.toFixed(1);
+    vMax.textContent = st.mMax.toFixed(1);
+    vY.textContent = st.yMin + (st.yMin===st.yMax ? '' : '–' + st.yMax);
+    cnt.textContent = '显示 ' + st.mMin.toFixed(1) + '–' + st.mMax.toFixed(1) +
+      ' 级';
+
+    var n = 0, maxM = null, sumM = 0;
+    for(var i=0;i<quakeItems.length;i++){
+      var it = quakeItems[i];
+      var ok = pass(it, st);
+      visible[i] = ok;
+      if(ok){
+        n++; sumM += it.q.mag;
+        if(maxM===null || it.q.mag > maxM) maxM = it.q.mag;
+        quakeShow(it);
+      } else {
+        quakeHide(it);
+      }
+    }
+    // 目录表联动：分页后不能再用「隐藏已有行」的旧办法 ——
+    // 行是按需生成的，隐藏 120 行之外的行毫无意义。改为整体重渲染。
+    window.__quakeVisible = visible;
+    if (window.__renderQTable) window.__renderQTable();
+    // 导出按钮上的条数要跟着筛选走（v3.1.0）
+    if (window.__updateExportLabels) window.__updateExportLabels();
+    // 统计条
+    var fs = document.getElementById('fstat');
+    if(fs){
+      fs.innerHTML = '<span>命中 <b>'+n+'</b> / '+quakeItems.length+' 次</span>'+
+        '<span>最大 <b>'+(maxM===null?'—':maxM.toFixed(1))+'</b>　平均 <b>'+
+        (n? (sumM/n).toFixed(2):'—')+'</b></span>';
+    }
+  }
+
+  [elMin, elMax, elYMin, elYMax].forEach(function(el){
+    el.addEventListener('input', function(){
+      bBig.className=''; bRecent.className='';
+      apply();
+    });
+  });
+
+  bReset.addEventListener('click', function(){
+    elMin.value = m0; elMax.value = m1;
+    elYMin.value = y0; elYMax.value = y1;
+    bins.forEach(function(b){ chipState[b]=true; });
+    Array.prototype.forEach.call(chipBox.children, function(c, ci){
+      c.className='fchip on'; c.style.background = magColor(bins[ci]);
+    });
+    bBig.className=''; bRecent.className='';
+    apply();
+  });
+  // 只看 M≥6：若本研究区最大震级不足 6，则按钮禁用并说明原因。
+  // 否则 elMin.value=6 会被 max=m1 钳回，出现「筛选后命中 0」且无解释的死角。
+  //
+  // ⚠️ 提示语必须用**真实最大震级**而不是滑块上界 m1：
+  // m1 是按 0.5 向上取整的滑块边界（实测淮南 M3.2 → m1=3.5），
+  // 拿它当「最大震级」报出去，会与概览面板的「最大震级 3.2」自相矛盾。
+  //
+  // ⚠️ v3.5.0 修：禁用判据原先用 m1（滑块上界，向上取整到 0.5），
+  // 于是真实最大震级 5.6 → m1=6.0 → 判为「可点」，点下去 elMin=6
+  // 但库里最大只有 5.6 → 命中 0 条且按钮显示为激活态（死胡同）。
+  // 现在判据改为**真实最大震级 realMaxM < 6**。
+  var realMaxM = mags.length ? Math.max.apply(null, mags) : null;
+  if(realMaxM === null || realMaxM < 6){
+    bBig.disabled = true;
+    bBig.title = '本研究区最大震级 '
+      + (realMaxM===null ? '—' : realMaxM.toFixed(1))
+      + '，无 M≥6 记录';
+    bBig.addEventListener('click', function(e){ e.preventDefault(); });
+  } else {
+    bBig.addEventListener('click', function(){
+      var on = bBig.className!=='on';
+      bBig.className = on ? 'on' : '';
+      // 两个快捷预设互斥：切到 M≥6 时必须把「近 30 年」的年代筛选也复位，
+      // 否则按钮高亮态与实际筛选条件会脱节（见下方说明）。
+      bRecent.className = '';
+      elYMin.value = y0; elYMax.value = y1;
+      // 震级档位 chip 也一并全开：chip 与滑块是「与」关系，
+      // chip 关着的话光开滑块仍可能命中 0 条。
+      bins.forEach(function(b){ chipState[b]=true; });
+      Array.prototype.forEach.call(chipBox.children, function(c, ci){
+        c.className='fchip on'; c.style.background = magColor(bins[ci]);
+      });
+      if(on){ elMin.value = Math.max(m0, 6); elMax.value = m1; }
+      else  { elMin.value = m0; elMax.value = m1; }
+      apply();
+    });
+  }
+  bRecent.addEventListener('click', function(){
+    var on = bRecent.className!=='on';
+    bRecent.className = on ? 'on' : '';
+    // 同理：切到「近 30 年」必须复位震级滑块。
+    // v3.5.0 修：原先只清了 bBig 的高亮 class，却留着 elMin=6，
+    // 于是按钮显示灰色但 M≥6 的筛选仍然生效（浏览器实测
+    // bBigGrayButMagStillLocked=true）—— 用户看到的和实际筛的不一致。
+    bBig.className = '';
+    elMin.value = m0; elMax.value = m1;
+    if(on){
+      // v3.5.0 修：原式 Math.max(y0, cur-30) 在「数据止于 30 年前」时
+      // 会超过滑块上界 y1，被浏览器钳回 y1 → 年代范围塌缩成 [y1,y1]，
+      // 一年份的诡异结果。此时应退回全区间。
+      var t = new Date().getFullYear() - 30;
+      elYMin.value = (t > y1) ? y0 : Math.max(y0, t);
+      elYMax.value = y1;
+    } else { elYMin.value = y0; elYMax.value = y1; }
+    apply();
+  });
+
+  window.__applyQuakeFilter = apply;
+  apply();
+})();
+
+// 地震目录表：点击表头排序，点击行定位到地图
+(function(){
+  var tbl = document.getElementById('qtable');
+  if(!tbl) return;
+  var tbody = tbl.querySelector('tbody');
+  var sortKey = 'date', sortAsc = false;   // v3.4.0：默认时间倒序（最新在前）
+
+  // ---- 分页（v2.0.0）----
+  // order 是「全量数据的显示顺序索引」，排序作用于它，所以排序始终是
+  // 全量的；renderTable 只画前 shown 条 —— 汶川 1268 行不再一次进 DOM。
+  var PAGE_SIZE = 120;
+  var shown = PAGE_SIZE;
+  var order = quakeItems.map(function(_, i){ return i; });
+
+  function esc(s){
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  // 与 build_map.py 的行结构保持一致（data-* 是排序与定位的依据）
+  function rowHtml(i){
+    var it = quakeItems[i], q = it.q;
+    var dep = (q.depth == null) ? '—' : q.depth.toFixed(0);
+    var sc = (q.in_boundary === true) ? '市域内'
+            : (q.in_boundary === false) ? '半径内' : '—';
+    var scCls = (q.in_boundary === true) ? 'sc in' : (q.in_boundary === false) ? 'sc out' : 'sc';
+    var src = q.source === 'CENC' ? 'cenc' : 'usgs';
+    var srcTag = q.source === 'CENC' ? '台网' : 'USGS';
+    var srcCls = 'src ' + src;
+    return '<tr data-i="'+i+'" data-date="'+it.ymd+'" data-mag="'+q.mag+'" '+
+      'data-depth="'+(q.depth == null ? 999 : q.depth)+'" '+
+      'data-dist="'+q.dist_km+'" data-scope="'+sc+'" data-src="'+srcTag+'" '+
+      'data-lat="'+q.lat+'" data-lon="'+q.lon+'" title="'+esc(q.place)+'">'+
+      '<td>'+it.ymd+'</td><td class="n '+(q.mag>=6?'md6':'md')+'">'+
+      q.mag.toFixed(1)+'</td><td class="n">'+dep+'</td><td class="n">'+
+      q.dist_km.toFixed(0)+'</td><td class="'+scCls+'">'+sc+'</td>'+
+      '<td class="'+srcCls+'">'+srcTag+'</td></tr>';
+  }
+  /* ---------- 地震目录搜索（v3.1.0）----------
+     只影响**表格显示**（定位工具），不改变地图点位可见性 ——
+     地图可见性由震级/年代筛选器统一控制，导出也只跟随筛选器。
+     职责分开，避免「搜到的看不见、导出的又不一样」。 */
+  // 搜索词放 window：事件绑定在另一个 IIFE 里（v2.1.0 交互段），
+  // 用局部变量的话赋值落在别处，搜索会**完全无效**（实测踩过）。
+  window.__qSearchTerm = window.__qSearchTerm || '';
+  function quakeMatch(i){
+    var qSearchTerm = window.__qSearchTerm;
+    if (!qSearchTerm) return true;
+    var q = quakeItems[i] && quakeItems[i].q;
+    if (!q) return false;
+    var t = qSearchTerm.toLowerCase();
+    var d = new Date(q.time);
+    var ymd = d.getUTCFullYear() + '-' +
+      String(d.getUTCMonth()+1).padStart(2,'0') + '-' +
+      String(d.getUTCDate()).padStart(2,'0');
+    if (ymd.indexOf(t) >= 0) return true;
+    if (String(q.mag).indexOf(t) >= 0) return true;
+    if (String(q.place || '').toLowerCase().indexOf(t) >= 0) return true;
+    if (String(q.id || '').toLowerCase().indexOf(t) >= 0) return true;
+    if (String(q.depth == null ? '' : q.depth).indexOf(t) >= 0) return true;
+    return false;
+  }
+  function renderTable(){
+    var vis = window.__quakeVisible;   // 筛选结果（全量布尔数组）
+    var html = '', n = 0, total = 0;
+    for (var k = 0; k < order.length && n < shown; k++){
+      var i = order[k];
+      if (vis && !vis[i]) continue;
+      if (!quakeMatch(i)) continue;    // 搜索过滤（仅表格）
+      html += rowHtml(i); n++;
+    }
+    // 花括号不能省：`if (vis) for (...) if (vis[m]) total++; else ...`
+    // 里的 else 会与**内层** if 配对，于是最后一个未通过筛选的事件
+    // 会把 total 覆盖成全量（实测显示成「已显示 13 / 1268 条」）。
+    total = 0;
+    if (vis){
+      for (var m = 0; m < vis.length; m++){
+        if (vis[m] && quakeMatch(m)) total++;
+      }
+    } else {
+      total = order.length;
+      if (window.__qSearchTerm){
+        total = 0;
+        for (var m2 = 0; m2 < order.length; m2++){
+          if (quakeMatch(order[m2])) total++;
+        }
+      }
+    }
+    // 搜索计数（tab 标题旁）
+    var sc = document.getElementById('qsearchcnt');
+    if (sc) sc.textContent = window.__qSearchTerm
+      ? ('匹配 ' + total + ' 条') : '';
+    tbody.innerHTML = html || '<tr><td colspan="6" style="color:#93a2b1">'
+      + '无匹配记录</td></tr>';
+    var more = document.getElementById('qmore');
+    var cnt2 = document.getElementById('qcount2');
+    if (more){
+      // 只有真的还有没显示的才出现，避免给用户一个点了没反应的按钮
+      more.hidden = !(n < total);
+    }
+    if (cnt2) cnt2.textContent = '已显示 ' + n + ' / ' + total + ' 条';
+  }
+  window.__renderQTable = renderTable;
+
+  function sortRows(){
+    order.sort(function(a, b){
+      var ia = quakeItems[a], ib = quakeItems[b];
+      var va, vb;
+      if (sortKey === 'mag'){ va = ia.q.mag; vb = ib.q.mag; }
+      else if (sortKey === 'depth'){
+        va = (ia.q.depth == null ? 999 : ia.q.depth);
+        vb = (ib.q.depth == null ? 999 : ib.q.depth);
+      }
+      else if (sortKey === 'dist'){ va = ia.q.dist_km; vb = ib.q.dist_km; }
+      else if (sortKey === 'scope'){
+        va = (ia.q.in_boundary === true ? 2 : ia.q.in_boundary === false ? 1 : 0);
+        vb = (ib.q.in_boundary === true ? 2 : ib.q.in_boundary === false ? 1 : 0);
+      }
+      else if (sortKey === 'src'){
+        va = (ia.q.source === 'CENC' ? 1 : 0);
+        vb = (ib.q.source === 'CENC' ? 1 : 0);
+      }
+      else { va = ia.q.time || 0; vb = ib.q.time || 0; }
+      var r = va < vb ? -1 : va > vb ? 1 : 0;
+      return sortAsc ? r : -r;
+    });
+    tbl.querySelectorAll('thead th').forEach(function(th){
+      th.textContent = th.textContent.replace(/[▲▼]\s*$/,'');
+      if(th.getAttribute('data-k')===sortKey){
+        th.textContent = th.textContent + (sortAsc?' ▲':' ▼');
+      }
+    });
+    renderTable();
+  }
+  var moreBtn = document.getElementById('qmorebtn');
+  if (moreBtn) moreBtn.addEventListener('click', function(){
+    shown += PAGE_SIZE; renderTable();
+  });
+  tbl.querySelectorAll('thead th').forEach(function(th){
+    th.addEventListener('click', function(){
+      var k = th.getAttribute('data-k');
+      // v3.5.0 修：切到「日期」列时原先置 sortAsc=true（升序），
+      // 与该列的初始/表头呈现（日期 ▼ 倒序）相反 ——
+      // 从别的列切回日期列会「突然反转一次」。
+      // 现在日期列一律默认倒序（与 v3.4.0 的目录默认排序一致），
+      // 再次点击同一列才切换方向。
+      if(k===sortKey) sortAsc = !sortAsc; else { sortKey=k; sortAsc = (k!=='date'); }
+      sortRows();
+    });
+  });
+  tbody.addEventListener('click', function(e){
+    var tr = e.target.closest('tr'); if(!tr) return;
+    var lat = parseFloat(tr.getAttribute('data-lat'));
+    var lon = parseFloat(tr.getAttribute('data-lon'));
+    if(isNaN(lat)||isNaN(lon)) return;
+    map.setView([lat,lon], 11);
+    var q = QUAKES.find(function(x){
+      return Math.abs(x.lat-lat)<1e-9 && Math.abs(x.lon-lon)<1e-9; });
+    if(q){
+      L.popup().setLatLng([q.lat,q.lon])
+        .setContent(quakePopupHtml(q, '')).openOn(map);
+    }
+  });
+  sortRows();
+  // 筛选变化后，导出按钮上的条数要跟着变（v3.1.0）
+  window.__updateExportLabels && window.__updateExportLabels();
+})();
+
+/* ================= v3.0.0：tab 切换 + 数据下载 ================= */
+(function(){
+  /* ---------- tab 切换（侧栏 3 个 + 地图区 3 个） ---------- */
+  function bindTabs(tabWrapId, tabAttr, paneAttr, panePrefix){
+    var wrap = document.getElementById(tabWrapId);
+    if(!wrap) return;
+    var tabs = wrap.querySelectorAll('[data-'+tabAttr+']');
+    tabs.forEach(function(t){
+      t.addEventListener('click', function(){
+        var key = t.getAttribute('data-'+tabAttr);
+        tabs.forEach(function(x){ x.classList.toggle('on', x===t); });
+        var host = wrap.parentNode;
+        host.querySelectorAll('[data-'+paneAttr+']').forEach(function(p){
+          p.classList.toggle('on', p.getAttribute('data-'+paneAttr)===key);
+        });
+        if(panePrefix==='m') window.__adaptStage && window.__adaptStage();
+        // v3.5.0：bindTabs 现在只被以 's'（侧栏）调用，panePrefix==='m'
+        // 分支永不触发 —— 但保留成本为零，且未来右侧面板若恢复 tab
+        // 就需要它。改为加一行注释说明，不再算作死代码缺陷。
+      });
+    });
+  }
+  bindTabs('stabs', 'tab', 'pane', 's');
+  window.__bindTabs = bindTabs;
+  // 供快捷键调用：切到指定侧栏 tab
+  window.__switchSideTab = function(key){
+    var btn = document.querySelector('#stabs [data-tab="' + key + '"]');
+    if (btn) btn.click();
+  };
+
+  /* ---------- 坐标：GCJ-02 → WGS84（导出用） ----------
+     页面内数据是 GCJ-02（与高德底图一致），但 GeoJSON 标准是 WGS84，
+     直接导出会让点在 GIS 里整体偏移 400–600 m。
+
+     逆变换用**不动点迭代**：w = gcj − f(w)（f 为正向偏移函数），
+     每轮都从**原始 GCJ** 重算，迭代 10 次。实测（那曲/北京/大理/深圳
+     五个点）往返误差 0.0000 m（浮点精度极限）。
+
+     ⚠️ 这里踩过三个坑，每个都会让导出坐标错 100 m ~ 2.4 km：
+       ① 写成 `w -= f(w)` —— 偏移会**累积**（6 次累积到 2.4 km）。
+          正确形式是 `w = gcj − f(w)`（每轮从 GCJ 重算）。
+       ② 二分法的区间更新 `m = w−d, p = w+d` 在 d 为负时**区间反转**，
+          负宽度下二分来回不收敛（实测残留 326 m）。本实现不用二分。
+       ③ tLat/tLon 若与 Python 端 _t_lat/_t_lon 不一致（x/y 混用、
+          系数 150/300 与 160/320 不同），会差出公里级。
+          下面两个函数与 build_map.py 的同名函数**逐项对齐**。 */
+  function gcj02ToWgs84(lon, lat){
+    if (lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271) {
+      return [lon, lat];
+    }
+    var a = 6378245.0, ee = 0.00669342162296594323;
+    // ↓↓ 与 build_map.py 的 _t_lat / _t_lon 逐项对齐（改这里必须同步改那里）
+    function tLat(x, y){
+      var r = (-100 + 2*x + 3*y + 0.2*y*y + 0.1*x*y
+               + 0.2*Math.sqrt(Math.abs(x)));
+      r += (20*Math.sin(6*x*Math.PI) + 20*Math.sin(2*x*Math.PI))*2/3;
+      r += (20*Math.sin(y*Math.PI) + 40*Math.sin(y/3*Math.PI))*2/3;
+      r += (160*Math.sin(y/12*Math.PI) + 320*Math.sin(y*Math.PI/30))*2/3;
+      return r;
+    }
+    function tLon(x, y){
+      var r = (300 + x + 2*y + 0.1*x*x + 0.1*x*y
+               + 0.1*Math.sqrt(Math.abs(x)));
+      r += (20*Math.sin(6*x*Math.PI) + 20*Math.sin(2*x*Math.PI))*2/3;
+      r += (20*Math.sin(x*Math.PI) + 40*Math.sin(x/3*Math.PI))*2/3;
+      r += (150*Math.sin(x/12*Math.PI) + 300*Math.sin(x/30*Math.PI))*2/3;
+      return r;
+    }
+    function forward(wLon, wLat){          // WGS84 → GCJ-02（正向）
+      var dLat = tLat(wLon-105, wLat-35);
+      var dLon = tLon(wLon-105, wLat-35);
+      var rad = wLat*Math.PI/180;
+      var magic = 1 - ee*Math.sin(rad)*Math.sin(rad);
+      var sq = Math.sqrt(magic);
+      dLat = (dLat*180)/((a*(1-ee))/(magic*sq)*Math.PI);
+      dLon = (dLon*180)/(a/sq*Math.cos(rad)*Math.PI);
+      return [wLon + dLon, wLat + dLat];
+    }
+    // 不动点迭代：w = gcj − (forward(w) − w) = gcj − 偏移量(w)
+    var wLon = lon, wLat = lat;
+    for (var i=0;i<10;i++){
+      var g = forward(wLon, wLat);
+      wLon = lon - (g[0] - wLon);   // 每轮从原始 GCJ 重算（不是累积）
+      wLat = lat - (g[1] - wLat);
+    }
+    return [wLon, wLat];
+  }
+  window.__gcj02ToWgs84 = gcj02ToWgs84;
+
+  /* ---------- 触发下载 ---------- */
+  function download(filename, text, mime){
+    var blob = new Blob([text], {type:(mime||'application/octet-stream')+';charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 400);
+  }
+  window.__download = download;
+
+  var CITY_TAG = (typeof CITY !== 'undefined') ? CITY : 'city';
+
+  /* ---------- 导出集合：地震跟随当前筛选（v3.1.0） ----------
+     实测缺口：v3.0.0 的导出直接用全量 QUAKES —— 用户在页面上筛了
+     「M≥6」，下载拿到的却是全部 251 条，所见非所得。
+     现在按 window.__quakeVisible（全量布尔数组，与 QUAKES 同序）过滤，
+     并把条数实时写进按钮文字。 */
+  function visibleQuakes(){
+    var vis = window.__quakeVisible;
+    if (!vis) return QUAKES.slice();
+    var out = [];
+    for (var i=0;i<QUAKES.length;i++){
+      if (vis[i] !== false) out.push(QUAKES[i]);
+    }
+    return out;
+  }
+  function updateExportLabels(){
+    var n = visibleQuakes().length;
+    var set = function(id, label){
+      var el = document.getElementById(id);
+      if (el) el.textContent = label + '（' + n + ' 条）';
+    };
+    set('dlQuakeJsonN', 'GeoJSON');
+    set('dlQuakeCsvN', 'CSV 表格');
+    // 断裂导出条数：GeoJSON/CSV 都是**按名称合并**后的产物
+    // （同名断裂在断库里是多段记录），所以按钮上的条数必须用
+    // 去重后的名称数，不能用 FAULTS.length（段数）——
+    // v3.5.0 修：原先写的是段数，实测按钮显示「24 条」而文件里
+    // 只有 13 个 feature，与页面头部「断裂 13 条」自相矛盾。
+    var fnSet = {};
+    FAULTS.forEach(function(f){ fnSet[f.name || '未命名断裂'] = 1; });
+    var fn = Object.keys(fnSet).length;
+    var fnSetFn = function(id, label){
+      var el = document.getElementById(id);
+      if (el) el.textContent = label + '（' + fn + ' 条）';
+    };
+    fnSetFn('dlFaultJsonN', 'GeoJSON');
+    fnSetFn('dlFaultCsvN', 'CSV 表格');
+  }
+  window.__visibleQuakes = visibleQuakes;
+  window.__updateExportLabels = updateExportLabels;
+
+  /* ---------- 地震：GeoJSON ---------- */
+  function quakeGeoJSON(){
+    var feats = visibleQuakes().map(function(q){
+      var w = gcj02ToWgs84(q.lon, q.lat);
+      var d = new Date(q.time);
+      return {
+        type:'Feature',
+        geometry:{type:'Point', coordinates:[+w[0].toFixed(6), +w[1].toFixed(6)]},
+        properties:{
+          id:q.id, mag:q.mag, depth_km:(q.depth==null?null:q.depth),
+          time:d.toISOString(), date:d.toISOString().slice(0,10),
+          place:q.place||'', dist_km:q.dist_km,
+          lon_gcj02:+q.lon.toFixed(6), lat_gcj02:+q.lat.toFixed(6),
+          url: quakeUrl(q)
+        }
+      };
+    });
+    return {
+      type:'FeatureCollection',
+      name: CITY_TAG + '_earthquakes_wgs84',
+      crs:{type:'name', properties:{name:'urn:ogc:def:crs:OGC:1.3:CRS84'}},
+      metadata:{
+        note:'坐标为 WGS84（由页面内 GCJ-02 逆向转换，精度 <1m）；' +
+             'properties 里同时给出 lon_gcj02/lat_gcj02 原值',
+        source:'USGS FDSNWS (ISC-GEM merged catalogue)',
+        city:CITY_TAG, total:visibleQuakes().length,
+        exported_filter:'当前筛选结果（震级/年代区间）',
+        generated:new Date().toISOString()
+      },
+      features:feats
+    };
+  }
+
+  /* ---------- 地震：CSV ---------- */
+  function quakeCSV(){
+    var rows = ['序号,事件ID,日期,震级,震源深度km,纬度WGS84,经度WGS84,距中心km,地点,USGS链接'];
+    visibleQuakes().forEach(function(q,i){
+      var w = gcj02ToWgs84(q.lon, q.lat);
+      var d = new Date(q.time);
+      rows.push([i+1, q.id, d.toISOString().slice(0,10), q.mag,
+                 (q.depth==null?'':q.depth),
+                 (+w[1].toFixed(6)), (+w[0].toFixed(6)),
+                 q.dist_km, '"'+String(q.place||'').replace(/"/g,'""')+'"',
+                 quakeUrl(q)].join(','));
+    });
+    // BOM：Excel 打开中文 CSV 不乱码
+    return '﻿' + rows.join('\r\n');
+  }
+
+  /* ---------- 断裂：GeoJSON ---------- */
+  function faultGeoJSON(){
+    // 同名断裂在断库里是多段记录，导出时按名称合并成 MultiLineString
+    var groups = {};
+    FAULTS.forEach(function(f){
+      var name = f.name || '未命名断裂';
+      if(!groups[name]) groups[name] = {name:name, en_name:f.en_name,
+        kind:f.kind, age:f.age, lines:[]};
+      groups[name].lines.push(f.coords.map(function(p){
+        var w = gcj02ToWgs84(p[0], p[1]);
+        return [+w[0].toFixed(6), +w[1].toFixed(6)];
+      }));
+    });
+    var feats = Object.keys(groups).map(function(k){
+      var g = groups[k];
+      return {
+        type:'Feature',
+        geometry:{type:'MultiLineString', coordinates:g.lines},
+        properties:{
+          name:g.name, en_name:g.en_name||'',
+          kind:g.kind||'', kind_cn:kindText(g.kind),
+          age:g.age||'', age_cn:ageText(g.age),
+          n_segments:g.lines.length,
+          crs_note:'坐标为 WGS84（由页面内 GCJ-02 逆向转换）'
+        }
+      };
+    });
+    return {
+      type:'FeatureCollection',
+      name: CITY_TAG + '_faults_wgs84',
+      crs:{type:'name', properties:{name:'urn:ogc:def:crs:OGC:1.3:CRS84'}},
+      metadata:{
+        note:'坐标为 WGS84；同名断裂已按名称合并为 MultiLineString',
+        source:'中国活断层数据库 CAFDv2023 (CN-faults.gmt)',
+        city:CITY_TAG, total:feats.length, generated:new Date().toISOString()
+      },
+      features:feats
+    };
+  }
+
+  /* ---------- 断裂：CSV ---------- */
+  function faultCSV(){
+    var rows = ['序号,断层名称,英文名,活动方式,活动方式(原始码),最新活动年代,年代(原始码),段数,点数'];
+    var groups = {};
+    FAULTS.forEach(function(f){
+      var name = f.name || '未命名断裂';
+      if(!groups[name]) groups[name] = {en:f.en_name||'', kind:f.kind||'',
+        age:f.age||'', n:0, pts:0};
+      groups[name].n++;
+      groups[name].pts += (f.coords?f.coords.length:0);
+    });
+    Object.keys(groups).forEach(function(k,i){
+      var g = groups[k];
+      rows.push([i+1, '"'+k.replace(/"/g,'""')+'"', g.en,
+                 kindText(g.kind), g.kind, ageText(g.age), g.age,
+                 g.n, g.pts].join(','));
+    });
+    return '﻿' + rows.join('\r\n');
+  }
+
+  function bind(id, fn){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('click', fn);
+  }
+  bind('dlQuakeJson', function(){
+    download(CITY_TAG+'_地震目录_wgs84.geojson',
+             JSON.stringify(quakeGeoJSON(), null, 1), 'application/geo+json');
+  });
+  bind('dlQuakeCsv', function(){
+    download(CITY_TAG+'_地震目录_wgs84.csv', quakeCSV(), 'text/csv');
+  });
+  bind('dlFaultJson', function(){
+    download(CITY_TAG+'_活动断层_wgs84.geojson',
+             JSON.stringify(faultGeoJSON(), null, 1), 'application/geo+json');
+  });
+  bind('dlFaultCsv', function(){
+    download(CITY_TAG+'_活动断层.csv', faultCSV(), 'text/csv');
+  });
+  window.__exports = {quakeGeoJSON:quakeGeoJSON, quakeCSV:quakeCSV,
+                      faultGeoJSON:faultGeoJSON, faultCSV:faultCSV,
+                      gcj02ToWgs84:gcj02ToWgs84};
+})();
+
+/* ================= v2.1.0 交互增强 ================= */
+// 1) 目录表行 hover → 地图对应点位脉冲高亮（表格与地图双向联动）
+// 2) 断裂清单折叠面板：默认只列前 8 条，「展开全部」一次加完
+// 3) Esc 关闭弹窗
+(function(){
+  // ---- 断裂清单分页/折叠 ----
+  var FSTEP = 8;
+  var fshown = FSTEP;
+  // 同理：断裂搜索词也要跨 IIFE
+  window.__fSearchTerm = window.__fSearchTerm || '';
+  var ftbody = document.querySelector('#ftable tbody');
+  var frowsAll = ftbody ? Array.prototype.slice.call(ftbody.querySelectorAll('tr')) : [];
+  function faultMatch(tr){
+    var fSearchTerm = window.__fSearchTerm;
+    if (!fSearchTerm) return true;
+    var name = tr.getAttribute('data-name') || '';
+    return name.toLowerCase().indexOf(fSearchTerm.toLowerCase()) >= 0;
+  }
+  function renderFaults(){
+    var n = 0, total = 0;
+    var shownN = 0;   // 匹配且已展示的条数
+    frowsAll.forEach(function(tr, i){
+      var hit = faultMatch(tr);
+      if (hit) total++;
+      var vis = hit && shownN < fshown;
+      tr.style.display = vis ? '' : 'none';
+      if (vis){ n++; shownN++; }
+    });
+    var sc = document.getElementById('fsearchcnt');
+    if (sc) sc.textContent = window.__fSearchTerm ? ('匹配 ' + total + ' 条') : '';
+    var more = document.getElementById('fmore');
+    var cnt = document.getElementById('fcount2');
+    if (more) more.hidden = !(fshown < total);
+    if (cnt) cnt.textContent = '已显示 ' + n + ' / ' + total + ' 条';
+  }
+  var fbtn = document.getElementById('fmorebtn');
+  if (fbtn) fbtn.addEventListener('click', function(){
+    // 按钮写的是「展开全部」，就一次展完 —— 分批展开与文案不符
+    fshown = frowsAll.length;
+    renderFaults();
+  });
+  // v3.0.0：断裂清单已移到独立 tab，不再需要 details 折叠与 pendingFull
+  renderFaults();
+
+  // ---- 断裂行 hover 高亮 + 点击定位 ----
+  var hlFault = null;   // 当前高亮的断裂 polyline 列表
+  // v3.4.0：恢复样式必须与「主线」的实际样式**逐项一致**，
+  // 否则 hover 一结束，线宽/透明度就回不到原值（肉眼可见的「跳一下」）。
+  // 这里不复用常量，直接从图层里第一条主线的 options 取，避免两处漂移。
+  var FAULT_MAIN_STYLE = {color:'#ff3b30', weight:2.3, opacity:1.0};
+  function clearFaultHl(){
+    if(!hlFault) return;
+    hlFault.forEach(function(pl){ pl.setStyle(FAULT_MAIN_STYLE); });
+    hlFault = null;
+  }
+  function highlightFault(name){
+    clearFaultHl();
+    if(!name || !faultLayer) return;
+    var hit = [];
+    faultLayer.eachLayer(function(pl){
+      if (pl instanceof L.Polyline && pl.options.color === '#ff3b30'
+          && pl.__fname === name){
+        pl.setStyle({color:'#ffd43b', weight:3.6, opacity:1});
+        hit.push(pl);
+      }
+    });
+    hlFault = hit;
+    if (hit.length){
+      // 只把视野挪到该断裂，不改变缩放级别太猛
+      var b = L.latLngBounds([]);
+      hit.forEach(function(pl){ b.extend(pl.getBounds()); });
+      if (b.isValid()) map.fitBounds(b, {padding:[60,60], maxZoom:11, animate:true});
+    }
+  }
+  if (ftbody){
+    // v3.5.0 修：mouseover 在**每个单元格**跨越时都会触发，
+    // 原先每次都调用 highlightFault → 里面又跑一遍 fitBounds，
+    // 于是划过一行 3 个格子就重算 3 次视野（实测 fitBoundsCalls=3），
+    // 地图跟着抖。现在按「行」去重：同一行只高亮/定位一次。
+    var hlRow = null;
+    ftbody.addEventListener('mouseover', function(e){
+      var tr = e.target.closest('tr'); if(!tr) return;
+      if (tr === hlRow) return;
+      hlRow = tr;
+      highlightFault(tr.getAttribute('data-name'));
+    });
+    ftbody.addEventListener('mouseleave', function(){
+      hlRow = null;
+      clearFaultHl();
+    });
+    ftbody.addEventListener('click', function(e){
+      var tr = e.target.closest('tr'); if(!tr) return;
+      hlRow = tr;
+      highlightFault(tr.getAttribute('data-name'));
+    });
+  }
+  window.__highlightFault = highlightFault;   // 供验证脚本调用
+  window.__renderFaults = renderFaults;       // 供搜索框调用（跨 IIFE）
+
+  // ---- 目录表行 hover → 地震点高亮 ----
+  var qtbody = document.querySelector('#qtable tbody');
+  if (qtbody){
+    var hlMarker = null, hlEl = null, hlR0 = 0;
+    function clearQuakeHl(){
+      if (hlMarker && hlMarker.setStyle){
+        hlMarker.setStyle({radius: hlR0, color:'#ffffff', fillColor: hlMarker.__c0 || undefined});
+        hlMarker = null;
+      }
+      if (hlEl){ hlEl.classList.remove('qkhl'); hlEl = null; }
+    }
+    qtbody.addEventListener('mouseover', function(e){
+      var tr = e.target.closest('tr'); if(!tr) return;
+      var i = parseInt(tr.getAttribute('data-i'), 10);
+      if (isNaN(i) || !quakeItems[i]) return;
+      var it = quakeItems[i];
+      clearQuakeHl();
+      var m = it.marker;
+      if (m.setRadius){                     // circleMarker：放大 + 换色
+        hlR0 = m.options.radius;
+        m.__c0 = m.options.fillColor;
+        m.setStyle({radius: hlR0 * 2.1, color:'#ffd43b', fillColor:'#ffd43b'});
+        m.bringToFront && m.bringToFront();
+        hlMarker = m;
+      } else if (m.getElement){              // divIcon：加 CSS 高亮类
+        var el = m.getElement();
+        if (el){ el.classList.add('qkhl'); hlEl = el; }
+      }
+    });
+    qtbody.addEventListener('mouseleave', clearQuakeHl);
+  }
+
+  // ---- 搜索框事件（v3.1.0）----
+  var qSearch = document.getElementById('qsearch');
+  if (qSearch){
+    qSearch.addEventListener('input', function(){
+      window.__qSearchTerm = qSearch.value.trim();
+      window.__renderQTable && window.__renderQTable();
+    });
+  }
+  var fSearch = document.getElementById('fsearch');
+  if (fSearch){
+    fSearch.addEventListener('input', function(){
+      window.__fSearchTerm = fSearch.value.trim();
+      window.__renderFaults && window.__renderFaults();
+    });
+  }
+
+  // ---- 快捷键：Esc 关弹窗 / 1·2·3 切侧栏 tab / / 聚焦搜索 ----
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape'){ map.closePopup(); return; }
+    // 输入框里不抢键
+    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === '1' || e.key === '2' || e.key === '3'){
+      // v3.4.0：第一个 tab 由「筛选」改为「概览」，
+      // 这里必须同步 —— 否则按 1 会去点一个不存在的 tab，静默无反应。
+      var keys = ['overview', 'quake', 'fault'];
+      var idx = parseInt(e.key, 10) - 1;
+      window.__switchSideTab && window.__switchSideTab(keys[idx]);
+      e.preventDefault();
+    } else if (e.key === '/'){
+      // v3.5.0 修：原先只找「当前 tab 里的搜索框」，而概览 tab 没有
+      // 搜索框 → 按 / 静默无反应（实测 focusedTag 仍为 BODY）。
+      // 现在：当前 tab 有搜索框就聚焦它；没有就退而求其次，
+      // 聚焦目录 tab（第一个带搜索框的 pane）。
+      var box = document.querySelector('.pane.on input[type=search]')
+             || document.querySelector('#qsearch');
+      if (box){
+        // 搜索框所在的 tab 必须可见，否则 focus() 无效
+        var pane = box.closest('.pane');
+        if (pane && !pane.classList.contains('on')){
+          window.__switchSideTab && window.__switchSideTab('quake');
+        }
+        setTimeout(function(){ box.focus(); box.select(); }, 0);
+        e.preventDefault();
+      }
+    }
+  });
+})();
+
+// 对外暴露内部状态：地图对象、图层、筛选器、断裂清单。
+// 没有这段，外部脚本（含自检 / Playwright 验证）拿不到闭包内的变量，
+// 只能靠点击 DOM 间接试探，可观测性极差。
+window.__map = map;
+window.__faultLayer = faultLayer;   // v2.1.0：供 hover 高亮与外部验证
+window.__quakeItems = quakeItems;
+window.__setLayer = setLayer;
+window.__layers = LAYER_ITEMS;
+window.__quakeFilter = window.__applyQuakeFilter;
+window.__mcol = document.getElementById('mcol');
+// v3.4.0：原 window.__mchart 指向已删除的 #mchart 元素（恒为 null），
+// 改为暴露右侧常驻面板容器，供外部脚本做布局断言。
+window.__lctrl = document.getElementById('lctrl');
+// v3.4.0：最大/最近地震标注图层，导出便于自动化验证
+window.__specialLayer = specialLayer;
+
+/* 矮屏自适应：地图区装不下「概览面板 + 图例」时收起图例。
+   为什么用 JS 而不是 media query：断点查的是**视口**高度，而浮层挤不挤
+   取决的是**地图区**高度。窄屏堆叠时地图区只占视口 54%，视口 640px
+   时地图区只有 346px —— 此时 media query 的 max-height:620 还没触发，
+   实测就出现了概览与图例重叠 162×104 px。按容器实测高度判断才准。 */
+function adaptStage(){
+  var st = document.querySelector('.stage');
+  var lctrl = document.getElementById('lctrl');
+  if(!st || !lctrl) return;
+  var h = st.clientHeight;
+  // v3.4.0：右上面板三段常驻展开（无 tab），矮屏时压缩「分布 / 图例」内容区，
+  // 避免整块面板过高把地图区压得太扁。
+  var cb = lctrl.querySelector('.mpane .cb');
+  if (cb) cb.style.maxHeight = (h < 460) ? '150px' : '';
+  var leg = lctrl.querySelector('.mpane .leg');
+  // v3.5.0 修：原先只设 maxHeight 而 .lctrl 是 overflow:hidden，
+  // 图例内容被直接裁掉且**无法滚动**（超高部分看不全）。
+  // 现在同时打开 overflow-y:auto，压缩时仍可滚阅。
+  if (leg){
+    leg.style.maxHeight = (h < 460) ? '190px' : '';
+    leg.style.overflowY = (h < 460) ? 'auto' : '';
+  }
+  lctrl.style.maxHeight = (h < 460) ? '58%' : '';
+}
+window.addEventListener('resize', adaptStage);
+adaptStage();
+window.__adaptStage = adaptStage;
+
+// 初始导出计数：updateExportLabels 定义在后面的 IIFE 里，
+// 目录表 IIFE 末尾调用时还没定义 → 这里补一次（否则初始不显示条数）
+if (window.__updateExportLabels) window.__updateExportLabels();
+
+} // end initMap
+
+// 启动：CDN 优先，失败则回退到本地 leaflet.js（--offline 生成）。
+// 关键：initMap 必须幂等 —— CDN script 与本地 script 都可能先后触发，
+// 早先版本用 __mapInited 标记但从未在 CDN 成功路径设置，
+// 导致「L 已定义但地图没初始化」的空图。
+var __mapInited = false;
+function startMap(){
+  if (typeof L === 'undefined') { return false; }
+  if (__mapInited) { return true; }
+  __mapInited = true;
+  try { initMap(); } catch(e){ __mapInited = false; throw e; }
+  return true;
+}
+window.__leafletReady = function(){ startMap(); };
+
+// 立即尝试一次（CDN 正常时 L 已就绪）
+if (!startMap()) {
+  // CDN 未就绪：轮询等待本地 leaflet.js 加载完成
+  var __tries = 0;
+  var __timer = setInterval(function(){
+    __tries++;
+    if (startMap()) { clearInterval(__timer); return; }
+    if (__tries > 40) {   // 约 12 秒
+      clearInterval(__timer);
+      var d=document.createElement('div');
+      d.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'+
+        'background:#161d26;color:#e6edf3;border:1px solid rgba(255,255,255,.11);border-radius:10px;'+
+        'padding:16px 22px;font-size:14px;z-index:2000;text-align:center;line-height:1.8';
+      d.innerHTML='<b>地图库加载失败</b><br>CDN 与本地 leaflet.js 均不可用<br>'+
+        '<span style="color:#aab8c6;font-size:12px">请检查网络，或将 leaflet.js / leaflet.css '+
+        '放在本 HTML 同目录</span>';
+      document.body.appendChild(d);
+    }
+  }, 300);
+}
+</script>
+</body>
+</html>
